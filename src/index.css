@@ -153,3 +153,17 @@ body {
   background: transparent !important;
   padding: 0 !important;
 }
+
+/* ── Settings page responsive grid ── */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 32px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}

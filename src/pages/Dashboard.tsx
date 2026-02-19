@@ -21,7 +21,7 @@ export default function Dashboard({ onCommitClick }: DashboardProps) {
   }, [loadActiveProject, loadCommits, loadGapCount])
 
   return (
-    <div style={{ padding: '32px 40px', maxWidth: 960 }}>
+    <div style={{ padding: '32px 40px', maxWidth: 960, margin: '0 auto' }}>
       {/* Header */}
       <h1
         className="font-mono"

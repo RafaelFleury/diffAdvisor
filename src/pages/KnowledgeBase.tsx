@@ -53,7 +53,7 @@ export default function KnowledgeBase() {
       />
 
       {/* Content area */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '24px 36px', maxWidth: 720 }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '24px 36px' }}>
         {currentNote ? (
           <>
             {/* Breadcrumb */}

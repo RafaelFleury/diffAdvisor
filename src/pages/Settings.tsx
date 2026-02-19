@@ -153,7 +153,7 @@ export default function Settings() {
     : ['GPT-4.1', 'GPT-4.1 Mini']
 
   return (
-    <div style={{ padding: '32px 40px', maxWidth: 640 }}>
+    <div style={{ padding: '32px 40px', maxWidth: 1200, margin: '0 auto' }}>
       <h1
         className="font-mono"
         style={{
@@ -167,208 +167,216 @@ export default function Settings() {
         Settings
       </h1>
 
-      {/* PROJECT */}
-      <SettingsSection title="Project">
-        <div style={rowStyle}>
-          <span style={labelStyle}>Monitored Directory</span>
-          <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-            <input style={inputStyle} value={settings.project.monitoredDirectory} readOnly />
-            <button style={auxButtonStyle}>Browse</button>
-          </div>
-        </div>
-        <div style={rowStyle}>
-          <span style={labelStyle}>File Extensions</span>
-          <input
-            style={inputStyle}
-            value={settings.project.fileExtensions}
-            onChange={(e) => updateSettings({ project: { ...settings.project, fileExtensions: e.target.value } })}
-          />
-        </div>
-        <div style={{ ...rowStyle, borderBottom: 'none' }}>
-          <span style={labelStyle}>Ignored Paths</span>
-          <input
-            style={inputStyle}
-            value={settings.project.ignoredPaths}
-            onChange={(e) => updateSettings({ project: { ...settings.project, ignoredPaths: e.target.value } })}
-          />
-        </div>
-      </SettingsSection>
-
-      {/* AI PROVIDER */}
-      <SettingsSection title="AI Provider">
-        <div style={rowStyle}>
-          <span style={labelStyle}>Provider</span>
-          <select
-            style={selectStyle}
-            value={provider}
-            onChange={(e) => {
-              const v = e.target.value as 'anthropic' | 'openai'
-              setProvider(v)
-              updateSettings({ ai: { ...settings.ai, provider: v } })
-            }}
-          >
-            <option value="anthropic">Anthropic</option>
-            <option value="openai">OpenAI</option>
-          </select>
-        </div>
-        <div style={rowStyle}>
-          <span style={labelStyle}>Model</span>
-          <select
-            style={selectStyle}
-            value={settings.ai.model}
-            onChange={(e) => updateSettings({ ai: { ...settings.ai, model: e.target.value } })}
-          >
-            {modelOptions.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
-        <div style={rowStyle}>
-          <span style={labelStyle}>API Key</span>
-          <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-            <input style={inputStyle} type="password" value={settings.ai.apiKey} onChange={(e) => updateSettings({ ai: { ...settings.ai, apiKey: e.target.value } })} />
-            <button style={auxButtonStyle} onClick={testConnection}>Test</button>
-          </div>
-        </div>
-        {connectionTestResult && (
-          <div style={{ ...rowStyle, borderBottom: 'none' }}>
-            <span style={labelStyle} />
-            <span className="font-mono" style={{ fontSize: 12, color: connectionTestResult.success ? 'var(--success)' : 'var(--critical)' }}>
-              {connectionTestResult.message}
-            </span>
-          </div>
-        )}
-        <div style={{ ...rowStyle, borderBottom: 'none' }}>
-          <span style={labelStyle}>Web Search</span>
-          <Toggle
-            checked={settings.ai.webSearch}
-            onChange={(v) => updateSettings({ ai: { ...settings.ai, webSearch: v } })}
-            label="Search for CVEs and best practices"
-          />
-        </div>
-      </SettingsSection>
-
-      {/* ANALYSIS */}
-      <SettingsSection title="Analysis">
-        <div style={rowStyle}>
-          <span style={labelStyle}>Auto-Analyze on Commit</span>
-          <Toggle
-            checked={settings.analysis.autoAnalyze}
-            onChange={(v) => updateSettings({ analysis: { ...settings.analysis, autoAnalyze: v } })}
-          />
-        </div>
-        <div style={rowStyle}>
-          <span style={labelStyle}>Checkpoint Mode</span>
-          <select
-            style={selectStyle}
-            value={settings.analysis.checkpointMode}
-            onChange={(e) => updateSettings({ analysis: { ...settings.analysis, checkpointMode: e.target.value as 'free_text' | 'multiple_choice' } })}
-          >
-            <option value="free_text">Free Text (deeper learning, uses more tokens)</option>
-            <option value="multiple_choice">Multiple Choice (faster review)</option>
-          </select>
-        </div>
-        <div style={{ ...rowStyle, borderBottom: 'none' }}>
-          <span style={labelStyle}>Analysis Depth</span>
-          <select
-            style={selectStyle}
-            value={settings.analysis.analysisDepth}
-            onChange={(e) => updateSettings({ analysis: { ...settings.analysis, analysisDepth: e.target.value as 'quick' | 'balanced' | 'deep' } })}
-          >
-            <option value="quick">Quick</option>
-            <option value="balanced">Balanced (recommended)</option>
-            <option value="deep">Deep</option>
-          </select>
-        </div>
-      </SettingsSection>
-
-      {/* KNOWLEDGE BASE */}
-      <SettingsSection title="Knowledge Base">
-        <div style={rowStyle}>
-          <span style={labelStyle}>Storage Path</span>
-          <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-            <input
-              style={inputStyle}
-              value={settings.knowledge.storagePath}
-              onChange={(e) => updateSettings({ knowledge: { ...settings.knowledge, storagePath: e.target.value } })}
-            />
-            <button style={auxButtonStyle}>Browse</button>
-          </div>
-        </div>
-        <div style={{ ...rowStyle, borderBottom: 'none' }}>
-          <span style={labelStyle}>Auto-Generate Notes</span>
-          <Toggle
-            checked={settings.knowledge.autoGenerateNotes}
-            onChange={(v) => updateSettings({ knowledge: { ...settings.knowledge, autoGenerateNotes: v } })}
-            label="Create .md notes from debriefs automatically"
-          />
-        </div>
-      </SettingsSection>
-
-      {/* SKILLS */}
-      <SettingsSection title="Skills">
-        {skills.map((skill, idx) => (
-          <div
-            key={skill.id}
-            style={{
-              ...rowStyle,
-              borderBottom: idx === skills.length - 1 ? 'none' : rowStyle.borderBottom,
-              justifyContent: 'space-between',
-            }}
-          >
-            <div>
-              <div className="font-mono" style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>
-                {skill.name}
-              </div>
-              <div className="font-mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                {skill.autoDetected ? 'auto-detected' : skill.enabled ? 'manually enabled' : 'disabled'}
-                {skill.tags.length > 0 && ` · ${skill.tags.join(', ')}`}
+      <div className="settings-grid">
+        {/* Column 1 */}
+        <div>
+          {/* PROJECT */}
+          <SettingsSection title="Project">
+            <div style={rowStyle}>
+              <span style={labelStyle}>Monitored Directory</span>
+              <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+                <input style={inputStyle} value={settings.project.monitoredDirectory} readOnly />
+                <button style={auxButtonStyle}>Browse</button>
               </div>
             </div>
-            <Toggle checked={skill.enabled} onChange={(v) => toggleSkill(skill.id, v)} />
-          </div>
-        ))}
-      </SettingsSection>
+            <div style={rowStyle}>
+              <span style={labelStyle}>File Extensions</span>
+              <input
+                style={inputStyle}
+                value={settings.project.fileExtensions}
+                onChange={(e) => updateSettings({ project: { ...settings.project, fileExtensions: e.target.value } })}
+              />
+            </div>
+            <div style={{ ...rowStyle, borderBottom: 'none' }}>
+              <span style={labelStyle}>Ignored Paths</span>
+              <input
+                style={inputStyle}
+                value={settings.project.ignoredPaths}
+                onChange={(e) => updateSettings({ project: { ...settings.project, ignoredPaths: e.target.value } })}
+              />
+            </div>
+          </SettingsSection>
 
-      {/* APPEARANCE */}
-      <SettingsSection title="Appearance">
-        <div style={rowStyle}>
-          <span style={labelStyle}>Theme</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {(['light', 'dark'] as Theme[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTheme(t)}
-                className="font-mono"
-                style={{
-                  padding: '7px 16px',
-                  fontSize: 12,
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  border: '1px solid var(--border)',
-                  backgroundColor: theme === t ? 'var(--text)' : 'transparent',
-                  color: theme === t ? 'var(--bg)' : 'var(--text-secondary)',
-                  transition: 'all 0.15s ease',
+          {/* AI PROVIDER */}
+          <SettingsSection title="AI Provider">
+            <div style={rowStyle}>
+              <span style={labelStyle}>Provider</span>
+              <select
+                style={selectStyle}
+                value={provider}
+                onChange={(e) => {
+                  const v = e.target.value as 'anthropic' | 'openai'
+                  setProvider(v)
+                  updateSettings({ ai: { ...settings.ai, provider: v } })
                 }}
               >
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </button>
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+            <div style={rowStyle}>
+              <span style={labelStyle}>Model</span>
+              <select
+                style={selectStyle}
+                value={settings.ai.model}
+                onChange={(e) => updateSettings({ ai: { ...settings.ai, model: e.target.value } })}
+              >
+                {modelOptions.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <div style={rowStyle}>
+              <span style={labelStyle}>API Key</span>
+              <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+                <input style={inputStyle} type="password" value={settings.ai.apiKey} onChange={(e) => updateSettings({ ai: { ...settings.ai, apiKey: e.target.value } })} />
+                <button style={auxButtonStyle} onClick={testConnection}>Test</button>
+              </div>
+            </div>
+            {connectionTestResult && (
+              <div style={{ ...rowStyle, borderBottom: 'none' }}>
+                <span style={labelStyle} />
+                <span className="font-mono" style={{ fontSize: 12, color: connectionTestResult.success ? 'var(--success)' : 'var(--critical)' }}>
+                  {connectionTestResult.message}
+                </span>
+              </div>
+            )}
+            <div style={{ ...rowStyle, borderBottom: 'none' }}>
+              <span style={labelStyle}>Web Search</span>
+              <Toggle
+                checked={settings.ai.webSearch}
+                onChange={(v) => updateSettings({ ai: { ...settings.ai, webSearch: v } })}
+                label="Search for CVEs and best practices"
+              />
+            </div>
+          </SettingsSection>
+
+          {/* ANALYSIS */}
+          <SettingsSection title="Analysis">
+            <div style={rowStyle}>
+              <span style={labelStyle}>Auto-Analyze on Commit</span>
+              <Toggle
+                checked={settings.analysis.autoAnalyze}
+                onChange={(v) => updateSettings({ analysis: { ...settings.analysis, autoAnalyze: v } })}
+              />
+            </div>
+            <div style={rowStyle}>
+              <span style={labelStyle}>Checkpoint Mode</span>
+              <select
+                style={selectStyle}
+                value={settings.analysis.checkpointMode}
+                onChange={(e) => updateSettings({ analysis: { ...settings.analysis, checkpointMode: e.target.value as 'free_text' | 'multiple_choice' } })}
+              >
+                <option value="free_text">Free Text (deeper learning, uses more tokens)</option>
+                <option value="multiple_choice">Multiple Choice (faster review)</option>
+              </select>
+            </div>
+            <div style={{ ...rowStyle, borderBottom: 'none' }}>
+              <span style={labelStyle}>Analysis Depth</span>
+              <select
+                style={selectStyle}
+                value={settings.analysis.analysisDepth}
+                onChange={(e) => updateSettings({ analysis: { ...settings.analysis, analysisDepth: e.target.value as 'quick' | 'balanced' | 'deep' } })}
+              >
+                <option value="quick">Quick</option>
+                <option value="balanced">Balanced (recommended)</option>
+                <option value="deep">Deep</option>
+              </select>
+            </div>
+          </SettingsSection>
+        </div>
+
+        {/* Column 2 */}
+        <div>
+          {/* KNOWLEDGE BASE */}
+          <SettingsSection title="Knowledge Base">
+            <div style={rowStyle}>
+              <span style={labelStyle}>Storage Path</span>
+              <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+                <input
+                  style={inputStyle}
+                  value={settings.knowledge.storagePath}
+                  onChange={(e) => updateSettings({ knowledge: { ...settings.knowledge, storagePath: e.target.value } })}
+                />
+                <button style={auxButtonStyle}>Browse</button>
+              </div>
+            </div>
+            <div style={{ ...rowStyle, borderBottom: 'none' }}>
+              <span style={labelStyle}>Auto-Generate Notes</span>
+              <Toggle
+                checked={settings.knowledge.autoGenerateNotes}
+                onChange={(v) => updateSettings({ knowledge: { ...settings.knowledge, autoGenerateNotes: v } })}
+                label="Create .md notes from debriefs automatically"
+              />
+            </div>
+          </SettingsSection>
+
+          {/* SKILLS */}
+          <SettingsSection title="Skills">
+            {skills.map((skill, idx) => (
+              <div
+                key={skill.id}
+                style={{
+                  ...rowStyle,
+                  borderBottom: idx === skills.length - 1 ? 'none' : rowStyle.borderBottom,
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div>
+                  <div className="font-mono" style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>
+                    {skill.name}
+                  </div>
+                  <div className="font-mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                    {skill.autoDetected ? 'auto-detected' : skill.enabled ? 'manually enabled' : 'disabled'}
+                    {skill.tags.length > 0 && ` · ${skill.tags.join(', ')}`}
+                  </div>
+                </div>
+                <Toggle checked={skill.enabled} onChange={(v) => toggleSkill(skill.id, v)} />
+              </div>
             ))}
-          </div>
+          </SettingsSection>
+
+          {/* APPEARANCE */}
+          <SettingsSection title="Appearance">
+            <div style={rowStyle}>
+              <span style={labelStyle}>Theme</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {(['light', 'dark'] as Theme[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setTheme(t)}
+                    className="font-mono"
+                    style={{
+                      padding: '7px 16px',
+                      fontSize: 12,
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      border: '1px solid var(--border)',
+                      backgroundColor: theme === t ? 'var(--text)' : 'transparent',
+                      color: theme === t ? 'var(--bg)' : 'var(--text-secondary)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ ...rowStyle, borderBottom: 'none' }}>
+              <span style={labelStyle}>Debrief Language</span>
+              <select
+                style={selectStyle}
+                value={settings.appearance.debriefLanguage}
+                onChange={(e) => updateSettings({ appearance: { ...settings.appearance, debriefLanguage: e.target.value as 'english' | 'portuguese' | 'auto' } })}
+              >
+                <option value="english">English</option>
+                <option value="portuguese">Portugus</option>
+                <option value="auto">Auto-detect</option>
+              </select>
+            </div>
+          </SettingsSection>
         </div>
-        <div style={{ ...rowStyle, borderBottom: 'none' }}>
-          <span style={labelStyle}>Debrief Language</span>
-          <select
-            style={selectStyle}
-            value={settings.appearance.debriefLanguage}
-            onChange={(e) => updateSettings({ appearance: { ...settings.appearance, debriefLanguage: e.target.value as 'english' | 'portuguese' | 'auto' } })}
-          >
-            <option value="english">English</option>
-            <option value="portuguese">Portugus</option>
-            <option value="auto">Auto-detect</option>
-          </select>
-        </div>
-      </SettingsSection>
+      </div>
     </div>
   )
 }

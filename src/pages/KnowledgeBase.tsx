@@ -1,8 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useKnowledgeStore } from '@/stores/knowledgeStore.ts'
 import KnowledgeTree from '@/components/features/knowledge/KnowledgeTree.tsx'
 import MarkdownRenderer from '@/components/features/knowledge/MarkdownRenderer.tsx'
+import NoteEditor from '@/components/features/knowledge/NoteEditor.tsx'
 import toast from 'react-hot-toast'
+
+type EditorMode = { type: 'closed' } | { type: 'new' } | { type: 'edit' }
 
 export default function KnowledgeBase() {
   const {
@@ -14,7 +17,10 @@ export default function KnowledgeBase() {
     loadNotes,
     selectNote,
     setSearchQuery,
+    saveNote,
   } = useKnowledgeStore()
+
+  const [editorMode, setEditorMode] = useState<EditorMode>({ type: 'closed' })
 
   useEffect(() => {
     loadNotes()
@@ -24,13 +30,37 @@ export default function KnowledgeBase() {
     const target = notes.find((n) => n.title === title)
     if (target) {
       selectNote(target.id)
+      setEditorMode({ type: 'closed' })
     } else {
       toast(`Note "${title}" doesn't exist yet`, { icon: '📝' })
     }
   }
 
   const handleNewNote = () => {
-    toast('Note editor coming soon', { icon: '📝' })
+    setEditorMode({ type: 'new' })
+  }
+
+  const handleEditNote = () => {
+    if (currentNote) {
+      setEditorMode({ type: 'edit' })
+    }
+  }
+
+  const handleSave = async (data: { title: string; content: string; categoryPath: string; tags: string[] }) => {
+    try {
+      const noteData = editorMode.type === 'edit' && currentNote
+        ? { id: currentNote.id, ...data }
+        : data
+      await saveNote(noteData)
+      setEditorMode({ type: 'closed' })
+      toast.success(editorMode.type === 'edit' ? 'Note updated' : 'Note created')
+    } catch {
+      toast.error('Failed to save note')
+    }
+  }
+
+  const handleCancel = () => {
+    setEditorMode({ type: 'closed' })
   }
 
   if (loading) {
@@ -41,12 +71,17 @@ export default function KnowledgeBase() {
     )
   }
 
+  const isEditing = editorMode.type !== 'closed'
+
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       <KnowledgeTree
         notes={filteredNotes}
         selectedNoteId={currentNote?.id ?? null}
-        onSelectNote={selectNote}
+        onSelectNote={(id) => {
+          selectNote(id)
+          setEditorMode({ type: 'closed' })
+        }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onNewNote={handleNewNote}
@@ -54,9 +89,15 @@ export default function KnowledgeBase() {
 
       {/* Content area */}
       <div style={{ flex: 1, overflow: 'auto', padding: '24px 36px' }}>
-        {currentNote ? (
+        {isEditing ? (
+          <NoteEditor
+            note={editorMode.type === 'edit' ? currentNote : null}
+            onSave={handleSave}
+            onCancel={handleCancel}
+          />
+        ) : currentNote ? (
           <>
-            {/* Breadcrumb */}
+            {/* Breadcrumb + Edit button */}
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
               <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
                 {currentNote.filePath}
@@ -76,6 +117,29 @@ export default function KnowledgeBase() {
                   auto-generated
                 </span>
               )}
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={handleEditNote}
+                className="font-mono"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '5px 12px',
+                  fontSize: 11,
+                  background: 'none',
+                  border: '1px solid var(--border)',
+                  borderRadius: 5,
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+                Edit
+              </button>
             </div>
 
             {/* Markdown content */}

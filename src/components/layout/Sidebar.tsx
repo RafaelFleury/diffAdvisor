@@ -1,16 +1,17 @@
 import type { ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useThemeStore } from '@/stores/themeStore.ts'
 
-type Page = 'dashboard' | 'debrief' | 'knowledge' | 'settings'
-
-interface SidebarProps {
-  activePage: Page
-  onNavigate: (page: Page) => void
+interface NavItem {
+  path: string
+  matchPrefix: string
+  icon: ReactNode
 }
 
-const navItems: { id: Page; icon: ReactNode }[] = [
+const navItems: NavItem[] = [
   {
-    id: 'dashboard',
+    path: '/',
+    matchPrefix: '/',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -21,7 +22,8 @@ const navItems: { id: Page; icon: ReactNode }[] = [
     ),
   },
   {
-    id: 'debrief',
+    path: '/',
+    matchPrefix: '/debrief',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -32,7 +34,8 @@ const navItems: { id: Page; icon: ReactNode }[] = [
     ),
   },
   {
-    id: 'knowledge',
+    path: '/knowledge',
+    matchPrefix: '/knowledge',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
@@ -43,7 +46,8 @@ const navItems: { id: Page; icon: ReactNode }[] = [
     ),
   },
   {
-    id: 'settings',
+    path: '/settings',
+    matchPrefix: '/settings',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="3" />
@@ -73,8 +77,19 @@ const MoonIcon = () => (
   </svg>
 )
 
-export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
+function isActive(pathname: string, item: NavItem, index: number): boolean {
+  // Dashboard: only exact match on "/"
+  if (index === 0) return pathname === '/'
+  // Debrief: matches /debrief/*
+  if (index === 1) return pathname.startsWith('/debrief')
+  // Others: prefix match
+  return pathname.startsWith(item.matchPrefix)
+}
+
+export default function Sidebar() {
   const { theme, toggleTheme } = useThemeStore()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   return (
     <div
@@ -107,47 +122,52 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: 16,
+            cursor: 'pointer',
           }}
+          onClick={() => navigate('/')}
         >
           {'</>'}
         </div>
 
         {/* Nav buttons */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onNavigate(item.id)}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 8,
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                backgroundColor: activePage === item.id ? 'var(--bg-hover)' : 'transparent',
-                color: activePage === item.id ? 'var(--text)' : 'var(--text-tertiary)',
-                padding: 0,
-              }}
-              onMouseEnter={(e) => {
-                if (activePage !== item.id) {
-                  e.currentTarget.style.backgroundColor = 'var(--bg-hover)'
-                  e.currentTarget.style.color = 'var(--text-secondary)'
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (activePage !== item.id) {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                  e.currentTarget.style.color = 'var(--text-tertiary)'
-                }
-              }}
-            >
-              {item.icon}
-            </button>
-          ))}
+          {navItems.map((item, idx) => {
+            const active = isActive(location.pathname, item, idx)
+            return (
+              <button
+                key={idx}
+                onClick={() => navigate(item.path)}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 8,
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  backgroundColor: active ? 'var(--bg-hover)' : 'transparent',
+                  color: active ? 'var(--text)' : 'var(--text-tertiary)',
+                  padding: 0,
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) {
+                    e.currentTarget.style.backgroundColor = 'var(--bg-hover)'
+                    e.currentTarget.style.color = 'var(--text-secondary)'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                    e.currentTarget.style.color = 'var(--text-tertiary)'
+                  }
+                }}
+              >
+                {item.icon}
+              </button>
+            )
+          })}
         </div>
       </div>
 

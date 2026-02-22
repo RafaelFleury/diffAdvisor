@@ -215,6 +215,7 @@ const mockDebriefs: Record<string, DebriefResult> = {
   a3f7c2d: {
     id: 'debrief-1',
     commitHash: 'a3f7c2d',
+    commitMessage: 'feat: add JWT auth endpoints',
     architecturalSummary:
       'This commit implements a JWT-based authentication system using Express.js with three endpoints: user registration, login, and profile retrieval. It follows the stateless authentication pattern where the server issues signed tokens instead of maintaining sessions, delegating state to the client.',
     patternsIdentified: [

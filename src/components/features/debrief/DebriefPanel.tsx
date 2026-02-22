@@ -1,6 +1,8 @@
 import type { DebriefResult, Evaluation } from '@/types/index.ts'
 import CollapsibleSection from '@/components/ui/CollapsibleSection.tsx'
-import GapAlert from './GapAlert.tsx'
+import ArchitecturalOverview from './ArchitecturalOverview.tsx'
+import DecisionsList from './DecisionsList.tsx'
+import GapsList from './GapsList.tsx'
 import CheckpointSection from './CheckpointSection.tsx'
 
 interface DebriefPanelProps {
@@ -27,72 +29,30 @@ const AlertTriangleIcon = () => (
 export default function DebriefPanel({ debrief, answers, onSubmitAnswer }: DebriefPanelProps) {
   return (
     <div style={{ padding: 20, overflow: 'auto', height: '100%' }}>
-      {/* Section 1: Architectural Overview */}
       <CollapsibleSection
         title="Architectural Overview"
         icon={<EyeIcon />}
         defaultExpanded={true}
       >
-        <p style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-secondary)', margin: 0 }}>
-          {debrief.architecturalSummary}
-        </p>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
-          {debrief.patternsIdentified.map((pattern) => (
-            <span
-              key={pattern}
-              className="font-mono"
-              style={{
-                fontSize: 11,
-                padding: '3px 10px',
-                borderRadius: 4,
-                backgroundColor: 'var(--bg-tertiary)',
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              {pattern}
-            </span>
-          ))}
-        </div>
+        <ArchitecturalOverview summary={debrief.architecturalSummary} patterns={debrief.patternsIdentified} />
       </CollapsibleSection>
 
-      {/* Section 2: Decisions Made */}
       <CollapsibleSection
         title="Decisions Made"
         icon={<span style={{ fontSize: 14 }}>{'\u2696'}</span>}
         defaultExpanded={false}
       >
-        {debrief.decisionsMade.map((decision, i) => (
-          <div key={i} style={{ marginBottom: i < debrief.decisionsMade.length - 1 ? 16 : 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)', marginBottom: 6 }}>
-              {decision.decision}
-            </div>
-            <div style={{ fontSize: 12, marginBottom: 4 }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Alternatives: </span>
-              <span style={{ color: 'var(--text-tertiary)' }}>{decision.alternatives}</span>
-            </div>
-            <div style={{ fontSize: 12 }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Trade-offs: </span>
-              <span style={{ color: 'var(--text-tertiary)' }}>{decision.tradeoffs}</span>
-            </div>
-          </div>
-        ))}
+        <DecisionsList decisions={debrief.decisionsMade} />
       </CollapsibleSection>
 
-      {/* Section 3: Gaps Found */}
       <CollapsibleSection
         title={`Gaps Found (${debrief.gaps.length})`}
         icon={<AlertTriangleIcon />}
         defaultExpanded={true}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {debrief.gaps.map((gap) => (
-            <GapAlert key={gap.id} gap={gap} />
-          ))}
-        </div>
+        <GapsList gaps={debrief.gaps} />
       </CollapsibleSection>
 
-      {/* Section 4: Checkpoint */}
       <CollapsibleSection
         title="Checkpoint"
         icon={<span style={{ fontSize: 14 }}>{'\u2753'}</span>}

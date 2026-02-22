@@ -1,15 +1,12 @@
 import { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useDebriefStore } from '@/stores/debriefStore.ts'
 import { useProjectStore } from '@/stores/projectStore.ts'
 import StatCard from '@/components/ui/StatCard.tsx'
 import CommitCard from '@/components/ui/CommitCard.tsx'
-import type { Commit } from '@/types/index.ts'
 
-interface DashboardProps {
-  onCommitClick: (commit: Commit) => void
-}
-
-export default function Dashboard({ onCommitClick }: DashboardProps) {
+export default function Dashboard() {
+  const navigate = useNavigate()
   const { pendingCommits, reviewedCommits, gapCount, loading, loadCommits, loadGapCount } =
     useDebriefStore()
   const { activeProject, loadActiveProject } = useProjectStore()
@@ -91,7 +88,7 @@ export default function Dashboard({ onCommitClick }: DashboardProps) {
                 <CommitCard
                   key={commit.hash}
                   commit={commit}
-                  onClick={() => onCommitClick(commit)}
+                  onClick={() => navigate(`/debrief/${commit.hash}`)}
                 />
               ))
             )}

@@ -1,16 +1,14 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useDebriefStore } from '@/stores/debriefStore.ts'
 import DiffViewer from '@/components/features/debrief/DiffViewer.tsx'
 import DebriefPanel from '@/components/features/debrief/DebriefPanel.tsx'
-import type { Commit } from '@/types/index.ts'
+import ResizablePanel from '@/components/features/debrief/ResizablePanel.tsx'
 import toast from 'react-hot-toast'
 
-interface DebriefProps {
-  commit: Commit | null
-  onBack: () => void
-}
-
-export default function Debrief({ commit, onBack }: DebriefProps) {
+export default function Debrief() {
+  const { commitHash } = useParams<{ commitHash: string }>()
+  const navigate = useNavigate()
   const {
     currentDebrief,
     diffFiles,
@@ -22,50 +20,18 @@ export default function Debrief({ commit, onBack }: DebriefProps) {
     clearDebrief,
   } = useDebriefStore()
 
-  const [dividerPos, setDividerPos] = useState(55)
-  const dragging = useRef(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-
   useEffect(() => {
-    if (commit) {
-      loadDebrief(commit.hash)
+    if (commitHash) {
+      loadDebrief(commitHash)
     }
     return () => clearDebrief()
-  }, [commit, loadDebrief, clearDebrief])
-
-  const handleMouseDown = useCallback(() => {
-    dragging.current = true
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-  }, [])
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!dragging.current || !containerRef.current) return
-      const rect = containerRef.current.getBoundingClientRect()
-      const pct = ((e.clientX - rect.left) / rect.width) * 100
-      setDividerPos(Math.min(75, Math.max(30, pct)))
-    }
-
-    const handleMouseUp = () => {
-      dragging.current = false
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [])
+  }, [commitHash, loadDebrief, clearDebrief])
 
   const handleMarkReviewed = async () => {
     if (currentDebrief) {
       await markReviewed(currentDebrief.id)
       toast.success('Marked as reviewed')
-      onBack()
+      navigate('/')
     }
   }
 
@@ -80,7 +46,7 @@ export default function Debrief({ commit, onBack }: DebriefProps) {
   }
 
   // Empty state
-  if (!commit) {
+  if (!commitHash) {
     return (
       <div
         style={{
@@ -139,7 +105,7 @@ export default function Debrief({ commit, onBack }: DebriefProps) {
         {/* Left */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
-            onClick={onBack}
+            onClick={() => navigate('/')}
             className="font-mono"
             style={{
               background: 'none',
@@ -156,10 +122,10 @@ export default function Debrief({ commit, onBack }: DebriefProps) {
           </button>
           <span style={{ color: 'var(--border)' }}>|</span>
           <span className="font-mono" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>
-            {commit.message}
+            {currentDebrief?.commitMessage ?? 'Loading...'}
           </span>
           <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-            {commit.hash}
+            {commitHash}
           </span>
         </div>
 
@@ -213,32 +179,10 @@ export default function Debrief({ commit, onBack }: DebriefProps) {
       </div>
 
       {/* Split view */}
-      <div ref={containerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Left: Diff */}
-        <div style={{ width: `${dividerPos}%`, overflow: 'hidden' }}>
-          <DiffViewer files={diffFiles} />
-        </div>
-
-        {/* Divider */}
-        <div
-          onMouseDown={handleMouseDown}
-          style={{
-            width: 5,
-            cursor: 'col-resize',
-            backgroundColor: 'var(--border)',
-            flexShrink: 0,
-            zIndex: 10,
-            transition: 'background-color 0.1s ease',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--text-tertiary)' }}
-          onMouseLeave={(e) => {
-            if (!dragging.current) e.currentTarget.style.backgroundColor = 'var(--border)'
-          }}
-        />
-
-        {/* Right: Debrief */}
-        <div style={{ width: `${100 - dividerPos}%`, overflow: 'auto' }}>
-          {currentDebrief ? (
+      <ResizablePanel
+        left={<DiffViewer files={diffFiles} />}
+        right={
+          currentDebrief ? (
             <DebriefPanel
               debrief={currentDebrief}
               answers={answers}
@@ -248,9 +192,9 @@ export default function Debrief({ commit, onBack }: DebriefProps) {
             <div className="font-mono" style={{ padding: 20, fontSize: 13, color: 'var(--text-tertiary)' }}>
               Loading debrief...
             </div>
-          )}
-        </div>
-      </div>
+          )
+        }
+      />
     </div>
   )
 }

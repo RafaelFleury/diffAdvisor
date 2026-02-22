@@ -7,7 +7,7 @@ describe('debriefStore', () => {
       pendingCommits: [],
       reviewedCommits: [],
       currentDebrief: null,
-      diffContent: '',
+      diffFiles: [],
       gapCount: 0,
       loading: false,
       debriefLoading: false,
@@ -38,7 +38,7 @@ describe('debriefStore', () => {
     const state = useDebriefStore.getState()
     expect(state.currentDebrief).not.toBeNull()
     expect(state.currentDebrief!.commitHash).toBe('a3f7c2d')
-    expect(state.diffContent).toBeTruthy()
+    expect(state.diffFiles.length).toBeGreaterThan(0)
     expect(state.debriefLoading).toBe(false)
   })
 
@@ -52,7 +52,7 @@ describe('debriefStore', () => {
     useDebriefStore.getState().clearDebrief()
     const state = useDebriefStore.getState()
     expect(state.currentDebrief).toBeNull()
-    expect(state.diffContent).toBe('')
+    expect(state.diffFiles).toEqual([])
   })
 
   it('submits answer and stores it', async () => {

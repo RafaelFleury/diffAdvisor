@@ -88,8 +88,10 @@ function testDebriefService(factory: () => IDebriefService, knownCommitHash: str
 
   it('returns diff content for a known commit', async () => {
     const diff = await service.getDiffContent(knownCommitHash)
-    expect(typeof diff).toBe('string')
+    expect(Array.isArray(diff)).toBe(true)
     expect(diff.length).toBeGreaterThan(0)
+    expect(diff[0]).toHaveProperty('fileName')
+    expect(diff[0]).toHaveProperty('diff')
   })
 
   it('returns a positive gap count', async () => {

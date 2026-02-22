@@ -34,6 +34,7 @@ export interface FileDiff {
 export interface DebriefResult {
   id: string
   commitHash: string
+  commitMessage: string
   architecturalSummary: string
   patternsIdentified: string[]
   decisionsMade: Decision[]

@@ -13,7 +13,7 @@ interface DebriefProps {
 export default function Debrief({ commit, onBack }: DebriefProps) {
   const {
     currentDebrief,
-    diffContent,
+    diffFiles,
     debriefLoading,
     answers,
     loadDebrief,
@@ -216,12 +216,7 @@ export default function Debrief({ commit, onBack }: DebriefProps) {
       <div ref={containerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Left: Diff */}
         <div style={{ width: `${dividerPos}%`, overflow: 'hidden' }}>
-          <DiffViewer
-            diff={diffContent}
-            fileName="src/routes/auth.ts"
-            additions={commit.additions}
-            deletions={commit.deletions}
-          />
+          <DiffViewer files={diffFiles} />
         </div>
 
         {/* Divider */}

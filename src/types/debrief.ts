@@ -24,6 +24,13 @@ export interface KnowledgeBaseNote {
   content: string
 }
 
+export interface FileDiff {
+  fileName: string
+  diff: string
+  additions: number
+  deletions: number
+}
+
 export interface DebriefResult {
   id: string
   commitHash: string

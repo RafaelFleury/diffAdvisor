@@ -1,12 +1,12 @@
 import { create } from 'zustand'
-import type { Commit, DebriefResult, Evaluation } from '@/types/index.ts'
+import type { Commit, DebriefResult, FileDiff, Evaluation } from '@/types/index.ts'
 import { debriefService, checkpointService } from '@/services/index.ts'
 
 interface DebriefState {
   pendingCommits: Commit[]
   reviewedCommits: Commit[]
   currentDebrief: DebriefResult | null
-  diffContent: string
+  diffFiles: FileDiff[]
   gapCount: number
   loading: boolean
   debriefLoading: boolean
@@ -24,7 +24,7 @@ export const useDebriefStore = create<DebriefState>((set, get) => ({
   pendingCommits: [],
   reviewedCommits: [],
   currentDebrief: null,
-  diffContent: '',
+  diffFiles: [],
   gapCount: 0,
   loading: false,
   debriefLoading: false,
@@ -47,11 +47,11 @@ export const useDebriefStore = create<DebriefState>((set, get) => ({
   loadDebrief: async (commitHash) => {
     set({ debriefLoading: true, error: null, answers: {} })
     try {
-      const [debrief, diff] = await Promise.all([
+      const [debrief, files] = await Promise.all([
         debriefService.runDebrief(commitHash),
         debriefService.getDiffContent(commitHash),
       ])
-      set({ currentDebrief: debrief, diffContent: diff, debriefLoading: false })
+      set({ currentDebrief: debrief, diffFiles: files, debriefLoading: false })
     } catch (e) {
       set({ error: (e as Error).message, debriefLoading: false })
     }
@@ -97,5 +97,5 @@ export const useDebriefStore = create<DebriefState>((set, get) => ({
     return evaluation
   },
 
-  clearDebrief: () => set({ currentDebrief: null, diffContent: '', answers: {} }),
+  clearDebrief: () => set({ currentDebrief: null, diffFiles: [], answers: {} }),
 }))

@@ -6,6 +6,7 @@ export type {
   Decision,
   Gap,
   KnowledgeBaseNote,
+  FileDiff,
   DebriefResult,
 } from './debrief.ts'
 export type {

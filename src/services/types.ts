@@ -2,6 +2,7 @@ import type {
   Project,
   Commit,
   DebriefResult,
+  FileDiff,
   CheckpointResponse,
   Evaluation,
   KnowledgeNote,
@@ -23,7 +24,7 @@ export interface IDebriefService {
   getDebriefByCommit(commitHash: string): Promise<DebriefResult | null>
   runDebrief(commitHash: string): Promise<DebriefResult>
   markReviewed(debriefId: string): Promise<void>
-  getDiffContent(commitHash: string): Promise<string>
+  getDiffContent(commitHash: string): Promise<FileDiff[]>
   getGapCount(projectId: string): Promise<number>
 }
 

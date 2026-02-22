@@ -2,6 +2,7 @@ import type {
   Project,
   Commit,
   DebriefResult,
+  FileDiff,
   CheckpointResponse,
   Evaluation,
   KnowledgeNote,
@@ -34,7 +35,7 @@ export class TauriDebriefService implements IDebriefService {
   getDebriefByCommit(_hash: string): Promise<DebriefResult | null> { return notImplemented('getDebriefByCommit') }
   runDebrief(_hash: string): Promise<DebriefResult> { return notImplemented('runDebrief') }
   markReviewed(_id: string): Promise<void> { return notImplemented('markReviewed') }
-  getDiffContent(_hash: string): Promise<string> { return notImplemented('getDiffContent') }
+  getDiffContent(_hash: string): Promise<FileDiff[]> { return notImplemented('getDiffContent') }
   getGapCount(_id: string): Promise<number> { return notImplemented('getGapCount') }
 }
 

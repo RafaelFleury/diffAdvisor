@@ -2,6 +2,7 @@ import type {
   Project,
   Commit,
   DebriefResult,
+  FileDiff,
   CheckpointResponse,
   Evaluation,
   KnowledgeNote,
@@ -80,7 +81,12 @@ const mockCommits: Commit[] = [
   },
 ]
 
-const mockDiff = `@@ -1,4 +1,87 @@
+const mockFileDiffs: FileDiff[] = [
+  {
+    fileName: 'src/routes/auth.ts',
+    additions: 87,
+    deletions: 4,
+    diff: `@@ -1,4 +1,87 @@
  import express from 'express';
 +import bcrypt from 'bcrypt';
 +import jwt from 'jsonwebtoken';
@@ -157,7 +163,53 @@ const mockDiff = `@@ -1,4 +1,87 @@
 +  }
 +});
 +
-+export default router;`
++export default router;`,
+  },
+  {
+    fileName: 'prisma/schema.prisma',
+    additions: 14,
+    deletions: 0,
+    diff: `@@ -0,0 +1,14 @@
++generator client {
++  provider = "prisma-client-js"
++}
++
++datasource db {
++  provider = "postgresql"
++  url      = env("DATABASE_URL")
++}
++
++model User {
++  id        String   @id @default(cuid())
++  email     String   @unique
++  password  String
++  name      String?
++  createdAt DateTime @default(now())
++}`,
+  },
+  {
+    fileName: 'src/app.ts',
+    additions: 8,
+    deletions: 2,
+    diff: `@@ -1,6 +1,12 @@
+ import express from 'express';
++import cors from 'cors';
+ import productRouter from './routes/products';
++import authRouter from './routes/auth';
+
+ const app = express();
++
++app.use(cors());
+ app.use(express.json());
+-app.use('/products', productRouter);
++app.use('/api/products', productRouter);
++app.use('/api/auth', authRouter);
++
++app.listen(3000, () => console.log('Server running on port 3000'));
+
+ export default app;`,
+  },
+]
 
 const mockDebriefs: Record<string, DebriefResult> = {
   a3f7c2d: {
@@ -913,9 +965,9 @@ export class MockDebriefService implements IDebriefService {
     }
   }
 
-  async getDiffContent(_commitHash: string): Promise<string> {
+  async getDiffContent(_commitHash: string): Promise<FileDiff[]> {
     await delay()
-    return mockDiff
+    return mockFileDiffs
   }
 
   async getGapCount(_projectId: string): Promise<number> {

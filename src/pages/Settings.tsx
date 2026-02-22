@@ -98,22 +98,24 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 
 // ── Section component ──
 
-function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+function SettingsSection({ title, children, headerRight }: { title: string; children: React.ReactNode; headerRight?: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 28 }}>
-      <h2
-        className="font-mono"
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          color: 'var(--text-tertiary)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          marginBottom: 14,
-        }}
-      >
-        {title}
-      </h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <h2
+          className="font-mono"
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: 'var(--text-tertiary)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}
+        >
+          {title}
+        </h2>
+        {headerRight}
+      </div>
       <div
         style={{
           backgroundColor: 'var(--card-bg)',
@@ -128,12 +130,139 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   )
 }
 
+// ── Add Skill Modal ──
+
+function AddSkillModal({ onClose, onAdd }: { onClose: () => void; onAdd: (skill: { name: string; description: string; tags: string[]; enabled: boolean; content: string; detect: { files: string[]; contentPatterns: string[]; extensions: string[] } }) => void }) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [tags, setTags] = useState('')
+
+  const handleSubmit = () => {
+    if (!name.trim()) return
+    onAdd({
+      name: name.trim(),
+      description: description.trim(),
+      tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+      enabled: true,
+      content: '',
+      detect: { files: [], contentPatterns: [], extensions: [] },
+    })
+    onClose()
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          backgroundColor: 'var(--card-bg)',
+          border: '1px solid var(--border)',
+          borderRadius: 10,
+          padding: 24,
+          width: 420,
+          maxWidth: '90vw',
+        }}
+      >
+        <h3
+          className="font-mono"
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: 'var(--text)',
+            marginBottom: 20,
+          }}
+        >
+          Add Custom Skill
+        </h3>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label className="font-mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'block', marginBottom: 6 }}>
+              Name
+            </label>
+            <input
+              style={inputStyle}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. GraphQL"
+            />
+          </div>
+          <div>
+            <label className="font-mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'block', marginBottom: 6 }}>
+              Description
+            </label>
+            <input
+              style={inputStyle}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. Schema design, N+1 queries, resolvers"
+            />
+          </div>
+          <div>
+            <label className="font-mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'block', marginBottom: 6 }}>
+              Tags (comma-separated)
+            </label>
+            <input
+              style={inputStyle}
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              placeholder="e.g. api, backend, graphql"
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 22 }}>
+          <button
+            onClick={onClose}
+            className="font-mono"
+            style={{
+              ...auxButtonStyle,
+              padding: '8px 18px',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            className="font-mono"
+            style={{
+              padding: '8px 18px',
+              backgroundColor: name.trim() ? 'var(--text)' : 'var(--bg-tertiary)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              color: name.trim() ? 'var(--bg)' : 'var(--text-tertiary)',
+              fontSize: 12,
+              cursor: name.trim() ? 'pointer' : 'default',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: 500,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            Add Skill
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Settings Page ──
 
 export default function Settings() {
-  const { settings, skills, connectionTestResult, loadSettings, loadSkills, updateSettings, toggleSkill, testConnection } = useSettingsStore()
+  const { settings, skills, connectionTestResult, loadSettings, loadSkills, updateSettings, toggleSkill, addSkill, testConnection } = useSettingsStore()
   const { theme, setTheme } = useThemeStore()
-  const [provider, setProvider] = useState<'anthropic' | 'openai'>('anthropic')
+  const [showAddSkill, setShowAddSkill] = useState(false)
 
   useEffect(() => {
     loadSettings()
@@ -147,10 +276,6 @@ export default function Settings() {
       </div>
     )
   }
-
-  const modelOptions = provider === 'anthropic'
-    ? ['Claude Sonnet 4', 'Claude Opus 4']
-    : ['GPT-4.1', 'GPT-4.1 Mini']
 
   return (
     <div style={{ padding: '32px 40px', maxWidth: 1200, margin: '0 auto' }}>
@@ -187,44 +312,96 @@ export default function Settings() {
                 onChange={(e) => updateSettings({ project: { ...settings.project, fileExtensions: e.target.value } })}
               />
             </div>
-            <div style={{ ...rowStyle, borderBottom: 'none' }}>
-              <span style={labelStyle}>Ignored Paths</span>
-              <input
-                style={inputStyle}
-                value={settings.project.ignoredPaths}
-                onChange={(e) => updateSettings({ project: { ...settings.project, ignoredPaths: e.target.value } })}
-              />
+            <div style={{ ...rowStyle, borderBottom: 'none', alignItems: 'flex-start' }}>
+              <span style={{ ...labelStyle, paddingTop: 2 }}>Ignored Paths</span>
+              <div style={{ flex: 1 }}>
+                {settings.project.hasGitignore ? (
+                  <>
+                    <div
+                      className="font-mono"
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--text-tertiary)',
+                        marginBottom: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                        <path d="M8 1C4.13 1 1 4.13 1 8s3.13 7 7 7 7-3.13 7-7-3.13-7-7-7zm0 12.5c-3.04 0-5.5-2.46-5.5-5.5S4.96 2.5 8 2.5s5.5 2.46 5.5 5.5-2.46 5.5-5.5 5.5z" fill="var(--success)" />
+                        <path d="M6.5 7.5L7.5 8.5L9.5 6" stroke="var(--success)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Synced from .gitignore
+                    </div>
+                    <div
+                      style={{
+                        padding: '8px 12px',
+                        backgroundColor: 'var(--code-bg)',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: 6,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 12,
+                        color: 'var(--text-secondary)',
+                        lineHeight: 1.7,
+                        whiteSpace: 'pre-wrap',
+                        maxHeight: 120,
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {settings.project.ignoredPaths}
+                    </div>
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      padding: '10px 14px',
+                      backgroundColor: 'var(--warning-bg)',
+                      border: '1px solid var(--warning-border)',
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+                      <path d="M8 1L1 14h14L8 1z" stroke="var(--warning)" strokeWidth="1.2" strokeLinejoin="round" />
+                      <path d="M8 6v3.5" stroke="var(--warning)" strokeWidth="1.2" strokeLinecap="round" />
+                      <circle cx="8" cy="11.5" r="0.6" fill="var(--warning)" />
+                    </svg>
+                    <div>
+                      <div className="font-mono" style={{ fontSize: 12, color: 'var(--warning)', fontWeight: 500, marginBottom: 3 }}>
+                        No .gitignore found
+                      </div>
+                      <div className="font-mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                        This project has no .gitignore file. Add one to your project root to configure which paths are excluded from analysis.
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </SettingsSection>
 
           {/* AI PROVIDER */}
           <SettingsSection title="AI Provider">
             <div style={rowStyle}>
-              <span style={labelStyle}>Provider</span>
-              <select
-                style={selectStyle}
-                value={provider}
-                onChange={(e) => {
-                  const v = e.target.value as 'anthropic' | 'openai'
-                  setProvider(v)
-                  updateSettings({ ai: { ...settings.ai, provider: v } })
-                }}
-              >
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
-              </select>
+              <span style={labelStyle}>Endpoint</span>
+              <input
+                style={inputStyle}
+                value={settings.ai.endpointUrl}
+                onChange={(e) => updateSettings({ ai: { ...settings.ai, endpointUrl: e.target.value } })}
+                placeholder="https://api.anthropic.com/v1"
+              />
             </div>
             <div style={rowStyle}>
               <span style={labelStyle}>Model</span>
-              <select
-                style={selectStyle}
+              <input
+                style={inputStyle}
                 value={settings.ai.model}
                 onChange={(e) => updateSettings({ ai: { ...settings.ai, model: e.target.value } })}
-              >
-                {modelOptions.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+                placeholder="Claude Sonnet 4"
+              />
             </div>
             <div style={rowStyle}>
               <span style={labelStyle}>API Key</span>
@@ -312,7 +489,42 @@ export default function Settings() {
           </SettingsSection>
 
           {/* SKILLS */}
-          <SettingsSection title="Skills">
+          <SettingsSection
+            title="Skills"
+            headerRight={
+              <button
+                onClick={() => setShowAddSkill(true)}
+                className="font-mono"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '5px 12px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text-secondary)',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--text-tertiary)'
+                  e.currentTarget.style.color = 'var(--text)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border)'
+                  e.currentTarget.style.color = 'var(--text-secondary)'
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+                Add Skill
+              </button>
+            }
+          >
             {skills.map((skill, idx) => (
               <div
                 key={skill.id}
@@ -377,6 +589,13 @@ export default function Settings() {
           </SettingsSection>
         </div>
       </div>
+
+      {showAddSkill && (
+        <AddSkillModal
+          onClose={() => setShowAddSkill(false)}
+          onAdd={(skill) => addSkill(skill)}
+        />
+      )}
     </div>
   )
 }

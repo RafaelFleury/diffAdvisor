@@ -12,6 +12,7 @@ interface SettingsState {
   updateSettings: (partial: Partial<AppSettings>) => Promise<void>
   loadSkills: () => Promise<void>
   toggleSkill: (skillId: string, enabled: boolean) => Promise<void>
+  addSkill: (skill: Omit<Skill, 'id' | 'autoDetected' | 'builtIn'>) => Promise<void>
   testConnection: () => Promise<void>
 }
 
@@ -53,6 +54,16 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   toggleSkill: async (skillId, enabled) => {
     try {
       await settingsService.toggleSkill(skillId, enabled)
+      const skills = await settingsService.getSkills()
+      set({ skills })
+    } catch (e) {
+      set({ error: (e as Error).message })
+    }
+  },
+
+  addSkill: async (skill) => {
+    try {
+      await settingsService.addSkill(skill)
       const skills = await settingsService.getSkills()
       set({ skills })
     } catch (e) {

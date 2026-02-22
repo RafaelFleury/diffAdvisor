@@ -6,13 +6,13 @@ export interface ProjectSettings {
   monitoredDirectory: string
   fileExtensions: string
   ignoredPaths: string
+  hasGitignore: boolean
 }
 
 export interface AISettings {
   endpointUrl: string
   model: string
   apiKey: string
-  provider: 'anthropic' | 'openai'
   webSearch: boolean
 }
 

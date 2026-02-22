@@ -805,13 +805,13 @@ const mockSettings: AppSettings = {
   project: {
     monitoredDirectory: '~/projects/e-commerce-api',
     fileExtensions: '.ts, .tsx, .js, .jsx, .py, .rs',
-    ignoredPaths: 'node_modules, .git, dist, __pycache__',
+    ignoredPaths: 'node_modules\n.git\ndist\n__pycache__\n*.log\n.env\n.env.*\ncoverage',
+    hasGitignore: true,
   },
   ai: {
     endpointUrl: 'https://api.anthropic.com/v1',
     model: 'Claude Sonnet 4',
     apiKey: 'sk-ant-••••••••••••••••',
-    provider: 'anthropic',
     webSearch: true,
   },
   analysis: {
@@ -1049,6 +1049,18 @@ export class MockSettingsService implements ISettingsService {
     await delay()
     const skill = skills.find((s) => s.id === skillId)
     if (skill) skill.enabled = enabled
+  }
+
+  async addSkill(skill: Omit<Skill, 'id' | 'autoDetected' | 'builtIn'>): Promise<Skill> {
+    await delay()
+    const newSkill: Skill = {
+      ...skill,
+      id: `custom-${Date.now()}`,
+      autoDetected: false,
+      builtIn: false,
+    }
+    skills.push(newSkill)
+    return newSkill
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {

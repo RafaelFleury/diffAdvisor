@@ -49,5 +49,6 @@ export interface ISettingsService {
   updateSettings(settings: Partial<AppSettings>): Promise<AppSettings>
   getSkills(): Promise<Skill[]>
   toggleSkill(skillId: string, enabled: boolean): Promise<void>
+  addSkill(skill: Omit<Skill, 'id' | 'autoDetected' | 'builtIn'>): Promise<Skill>
   testConnection(): Promise<{ success: boolean; message: string }>
 }

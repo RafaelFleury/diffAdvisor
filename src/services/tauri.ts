@@ -56,5 +56,6 @@ export class TauriSettingsService implements ISettingsService {
   updateSettings(_settings: Partial<AppSettings>): Promise<AppSettings> { return notImplemented('updateSettings') }
   getSkills(): Promise<Skill[]> { return notImplemented('getSkills') }
   toggleSkill(_id: string, _enabled: boolean): Promise<void> { return notImplemented('toggleSkill') }
+  addSkill(_skill: Omit<Skill, 'id' | 'autoDetected' | 'builtIn'>): Promise<Skill> { return notImplemented('addSkill') }
   testConnection(): Promise<{ success: boolean; message: string }> { return notImplemented('testConnection') }
 }

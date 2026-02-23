@@ -91,7 +91,7 @@ fn migration_001(conn: &Connection) -> DbResult<()> {
             category_path TEXT NOT NULL DEFAULT '',
             file_path TEXT NOT NULL DEFAULT '',
             auto_generated INTEGER NOT NULL DEFAULT 0,
-            tags TEXT NOT NULL DEFAULT '',
+            tags TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
@@ -120,20 +120,21 @@ fn migration_001(conn: &Connection) -> DbResult<()> {
 
 fn seed_default_settings(conn: &Connection) -> DbResult<()> {
     let defaults = vec![
-        ("project.monitoredPath", ""),
-        ("project.extensions", ".ts,.tsx,.js,.jsx,.py,.rs,.go,.java"),
+        ("project.monitoredDirectory", ""),
+        ("project.fileExtensions", ".ts,.tsx,.js,.jsx,.py,.rs,.go,.java"),
         ("project.ignoredPaths", "node_modules,.git,dist,__pycache__,target"),
+        ("project.hasGitignore", "false"),
         ("ai.endpointUrl", "https://api.openai.com/v1"),
         ("ai.model", "gpt-4.1"),
         ("ai.apiKey", ""),
         ("ai.webSearch", "false"),
         ("analysis.autoAnalyze", "false"),
         ("analysis.checkpointMode", "free_text"),
-        ("analysis.depth", "balanced"),
+        ("analysis.analysisDepth", "balanced"),
         ("knowledge.storagePath", "~/knowledge_base"),
-        ("knowledge.autoGenerate", "false"),
+        ("knowledge.autoGenerateNotes", "false"),
         ("appearance.theme", "dark"),
-        ("appearance.language", "en"),
+        ("appearance.debriefLanguage", "english"),
     ];
 
     let mut stmt = conn

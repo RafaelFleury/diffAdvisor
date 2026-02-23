@@ -229,6 +229,46 @@ mod tests {
     }
 
     #[test]
+    fn test_update_project() {
+        let db = setup();
+        let project = db.create_project("Old Name", "/tmp/test", "ts", &["react".into()], &[]).unwrap();
+        db.update_project(project.id, "New Name", "rust", &["actix".into(), "serde".into()])
+            .unwrap();
+        let updated = db.get_project(project.id).unwrap();
+        assert_eq!(updated.name, "New Name");
+        assert_eq!(updated.language, "rust");
+        assert_eq!(updated.frameworks, vec!["actix", "serde"]);
+    }
+
+    #[test]
+    fn test_update_project_not_found() {
+        let db = setup();
+        let result = db.update_project(9999, "Name", "ts", &[]);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
+    fn test_update_project_skills_not_found() {
+        let db = setup();
+        let result = db.update_project_skills(9999, &["skill".into()]);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
+    fn test_update_project_last_analyzed_not_found() {
+        let db = setup();
+        let result = db.update_project_last_analyzed(9999);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
+    fn test_delete_project_not_found() {
+        let db = setup();
+        let result = db.delete_project(9999);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
     fn test_delete_cascades_to_debriefs() {
         let db = setup();
         let project = db.create_project("Test", "/tmp/test", "ts", &[], &[]).unwrap();

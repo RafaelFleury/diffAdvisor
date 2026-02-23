@@ -52,18 +52,29 @@ impl Database {
         let mut map = serde_json::Map::new();
         for s in settings {
             let parts: Vec<&str> = s.key.splitn(2, '.').collect();
+            let value = Self::parse_setting_value(&s.value);
             if parts.len() == 2 {
                 let section = map
                     .entry(parts[0].to_string())
                     .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
                 if let serde_json::Value::Object(ref mut obj) = section {
-                    obj.insert(parts[1].to_string(), serde_json::Value::String(s.value));
+                    obj.insert(parts[1].to_string(), value);
                 }
             } else {
-                map.insert(s.key, serde_json::Value::String(s.value));
+                map.insert(s.key, value);
             }
         }
         Ok(serde_json::to_string(&map)?)
+    }
+
+    /// Parse a setting value string into the appropriate JSON type.
+    /// "true"/"false" → bool, otherwise → string.
+    fn parse_setting_value(value: &str) -> serde_json::Value {
+        match value {
+            "true" => serde_json::Value::Bool(true),
+            "false" => serde_json::Value::Bool(false),
+            _ => serde_json::Value::String(value.to_string()),
+        }
     }
 }
 
@@ -131,7 +142,15 @@ mod tests {
         let db = setup();
         let json_str = db.get_app_settings().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-        assert!(parsed["appearance"]["theme"].as_str() == Some("dark"));
-        assert!(parsed["ai"]["model"].as_str() == Some("gpt-4.1"));
+        assert_eq!(parsed["appearance"]["theme"].as_str(), Some("dark"));
+        assert_eq!(parsed["appearance"]["debriefLanguage"].as_str(), Some("english"));
+        assert_eq!(parsed["ai"]["model"].as_str(), Some("gpt-4.1"));
+        assert_eq!(parsed["ai"]["webSearch"].as_bool(), Some(false));
+        assert_eq!(parsed["analysis"]["analysisDepth"].as_str(), Some("balanced"));
+        assert_eq!(parsed["analysis"]["autoAnalyze"].as_bool(), Some(false));
+        assert_eq!(parsed["project"]["monitoredDirectory"].as_str(), Some(""));
+        assert_eq!(parsed["project"]["fileExtensions"].as_str(), Some(".ts,.tsx,.js,.jsx,.py,.rs,.go,.java"));
+        assert_eq!(parsed["project"]["hasGitignore"].as_bool(), Some(false));
+        assert_eq!(parsed["knowledge"]["autoGenerateNotes"].as_bool(), Some(false));
     }
 }

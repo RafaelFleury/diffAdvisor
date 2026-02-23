@@ -126,6 +126,13 @@ mod tests {
     }
 
     #[test]
+    fn test_update_evaluation_not_found() {
+        let (db, _) = setup();
+        let result = db.update_checkpoint_evaluation(9999, r#"{"score": 5}"#);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
     fn test_update_evaluation() {
         let (db, debrief_id) = setup();
         let response = db

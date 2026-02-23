@@ -12,12 +12,13 @@ impl Database {
         category_path: &str,
         file_path: &str,
         auto_generated: bool,
-        tags: &str,
+        tags: &[String],
     ) -> DbResult<KnowledgeNote> {
         let conn = self.conn();
+        let tags_json = serde_json::to_string(tags)?;
         conn.execute(
             "INSERT INTO knowledge_notes (project_id, title, category_path, file_path, auto_generated, tags) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![project_id, title, category_path, file_path, auto_generated as i32, tags],
+            params![project_id, title, category_path, file_path, auto_generated as i32, tags_json],
         )?;
         let id = conn.last_insert_rowid();
         drop(conn);
@@ -75,12 +76,13 @@ impl Database {
         title: &str,
         category_path: &str,
         file_path: &str,
-        tags: &str,
+        tags: &[String],
     ) -> DbResult<()> {
         let conn = self.conn();
+        let tags_json = serde_json::to_string(tags)?;
         let rows = conn.execute(
             "UPDATE knowledge_notes SET title = ?1, category_path = ?2, file_path = ?3, tags = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?5",
-            params![title, category_path, file_path, tags, id],
+            params![title, category_path, file_path, tags_json, id],
         )?;
         if rows == 0 {
             return Err(DbError::NotFound);
@@ -98,6 +100,7 @@ impl Database {
     }
 
     fn row_to_knowledge_note(row: &rusqlite::Row) -> KnowledgeNote {
+        let tags_str: String = row.get(6).unwrap_or_default();
         KnowledgeNote {
             id: row.get(0).unwrap(),
             project_id: row.get(1).unwrap_or(None),
@@ -105,7 +108,7 @@ impl Database {
             category_path: row.get(3).unwrap_or_default(),
             file_path: row.get(4).unwrap_or_default(),
             auto_generated: row.get::<_, i32>(5).unwrap_or(0) != 0,
-            tags: row.get(6).unwrap_or_default(),
+            tags: serde_json::from_str(&tags_str).unwrap_or_default(),
             created_at: row.get(7).unwrap(),
             updated_at: row.get(8).unwrap(),
         }
@@ -130,21 +133,22 @@ mod tests {
                 "concepts/security",
                 "/kb/concepts/security/JWT Authentication.md",
                 true,
-                "security,authentication,jwt",
+                &["security".into(), "authentication".into(), "jwt".into()],
             )
             .unwrap();
         assert_eq!(note.title, "JWT Authentication");
         assert_eq!(note.category_path, "concepts/security");
         assert!(note.auto_generated);
         assert!(note.project_id.is_none());
+        assert_eq!(note.tags, vec!["security", "authentication", "jwt"]);
     }
 
     #[test]
     fn test_search_by_title() {
         let db = setup();
-        db.create_knowledge_note(None, "JWT Authentication", "concepts/security", "/kb/jwt.md", true, "security")
+        db.create_knowledge_note(None, "JWT Authentication", "concepts/security", "/kb/jwt.md", true, &["security".into()])
             .unwrap();
-        db.create_knowledge_note(None, "Rate Limiting", "concepts/security", "/kb/rate.md", true, "security")
+        db.create_knowledge_note(None, "Rate Limiting", "concepts/security", "/kb/rate.md", true, &["security".into()])
             .unwrap();
 
         let results = db.search_knowledge_notes("JWT").unwrap();
@@ -155,9 +159,9 @@ mod tests {
     #[test]
     fn test_search_by_tag() {
         let db = setup();
-        db.create_knowledge_note(None, "JWT Auth", "security", "/kb/jwt.md", true, "security,auth")
+        db.create_knowledge_note(None, "JWT Auth", "security", "/kb/jwt.md", true, &["security".into(), "auth".into()])
             .unwrap();
-        db.create_knowledge_note(None, "React Hooks", "frontend", "/kb/hooks.md", false, "react,frontend")
+        db.create_knowledge_note(None, "React Hooks", "frontend", "/kb/hooks.md", false, &["react".into(), "frontend".into()])
             .unwrap();
 
         let results = db.search_knowledge_notes("react").unwrap();
@@ -169,21 +173,21 @@ mod tests {
     fn test_update_knowledge_note() {
         let db = setup();
         let note = db
-            .create_knowledge_note(None, "Old Title", "old/path", "/kb/old.md", false, "tag1")
+            .create_knowledge_note(None, "Old Title", "old/path", "/kb/old.md", false, &["tag1".into()])
             .unwrap();
-        db.update_knowledge_note(note.id, "New Title", "new/path", "/kb/new.md", "tag1,tag2")
+        db.update_knowledge_note(note.id, "New Title", "new/path", "/kb/new.md", &["tag1".into(), "tag2".into()])
             .unwrap();
         let updated = db.get_knowledge_note(note.id).unwrap();
         assert_eq!(updated.title, "New Title");
         assert_eq!(updated.category_path, "new/path");
-        assert_eq!(updated.tags, "tag1,tag2");
+        assert_eq!(updated.tags, vec!["tag1", "tag2"]);
     }
 
     #[test]
     fn test_delete_knowledge_note() {
         let db = setup();
         let note = db
-            .create_knowledge_note(None, "To Delete", "path", "/kb/del.md", false, "")
+            .create_knowledge_note(None, "To Delete", "path", "/kb/del.md", false, &[])
             .unwrap();
         db.delete_knowledge_note(note.id).unwrap();
         let result = db.get_knowledge_note(note.id);
@@ -191,10 +195,31 @@ mod tests {
     }
 
     #[test]
+    fn test_update_knowledge_note_not_found() {
+        let db = setup();
+        let result = db.update_knowledge_note(9999, "Title", "path", "/kb/x.md", &["tag".into()]);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
+    fn test_delete_knowledge_note_not_found() {
+        let db = setup();
+        let result = db.delete_knowledge_note(9999);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
+    fn test_get_knowledge_note_not_found() {
+        let db = setup();
+        let result = db.get_knowledge_note(9999);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
     fn test_list_knowledge_notes() {
         let db = setup();
-        db.create_knowledge_note(None, "Note 1", "cat1", "/kb/1.md", false, "").unwrap();
-        db.create_knowledge_note(None, "Note 2", "cat2", "/kb/2.md", true, "").unwrap();
+        db.create_knowledge_note(None, "Note 1", "cat1", "/kb/1.md", false, &[]).unwrap();
+        db.create_knowledge_note(None, "Note 2", "cat2", "/kb/2.md", true, &[]).unwrap();
         let notes = db.list_knowledge_notes().unwrap();
         assert_eq!(notes.len(), 2);
     }

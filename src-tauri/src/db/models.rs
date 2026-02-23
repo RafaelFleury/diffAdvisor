@@ -61,7 +61,7 @@ pub struct KnowledgeNote {
     pub category_path: String,
     pub file_path: String,
     pub auto_generated: bool,
-    pub tags: String,
+    pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }

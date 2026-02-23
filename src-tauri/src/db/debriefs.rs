@@ -40,11 +40,11 @@ impl Database {
         })
     }
 
-    pub fn get_debrief_by_commit(&self, commit_hash: &str) -> DbResult<Option<Debrief>> {
+    pub fn get_debrief_by_commit(&self, project_id: i64, commit_hash: &str) -> DbResult<Option<Debrief>> {
         let conn = self.conn();
         let result = conn.query_row(
-            "SELECT id, project_id, commit_hash, commit_message, diff_content, ai_response_json, skills_used, status, created_at FROM debriefs WHERE commit_hash = ?1",
-            params![commit_hash],
+            "SELECT id, project_id, commit_hash, commit_message, diff_content, ai_response_json, skills_used, status, created_at FROM debriefs WHERE project_id = ?1 AND commit_hash = ?2",
+            params![project_id, commit_hash],
             |row| Ok(Self::row_to_debrief(row)),
         );
         match result {
@@ -142,16 +142,33 @@ mod tests {
     fn test_get_debrief_by_commit() {
         let (db, pid) = setup();
         db.create_debrief(pid, "abc123", "test", "", None, &[]).unwrap();
-        let found = db.get_debrief_by_commit("abc123").unwrap();
+        let found = db.get_debrief_by_commit(pid, "abc123").unwrap();
         assert!(found.is_some());
         assert_eq!(found.unwrap().commit_hash, "abc123");
     }
 
     #[test]
     fn test_get_debrief_by_commit_not_found() {
-        let (db, _) = setup();
-        let result = db.get_debrief_by_commit("nonexistent").unwrap();
+        let (db, pid) = setup();
+        let result = db.get_debrief_by_commit(pid, "nonexistent").unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_debrief_by_commit_scoped_to_project() {
+        let (db, pid1) = setup();
+        let p2 = db.create_project("Other", "/tmp/other", "ts", &[], &[]).unwrap();
+        db.create_debrief(pid1, "abc123", "commit on p1", "", None, &[]).unwrap();
+        db.create_debrief(p2.id, "abc123", "commit on p2", "", None, &[]).unwrap();
+
+        let found1 = db.get_debrief_by_commit(pid1, "abc123").unwrap().unwrap();
+        assert_eq!(found1.commit_message, "commit on p1");
+
+        let found2 = db.get_debrief_by_commit(p2.id, "abc123").unwrap().unwrap();
+        assert_eq!(found2.commit_message, "commit on p2");
+
+        let not_found = db.get_debrief_by_commit(pid1, "nonexistent").unwrap();
+        assert!(not_found.is_none());
     }
 
     #[test]
@@ -184,6 +201,20 @@ mod tests {
         db.mark_debrief_reviewed(debrief.id).unwrap();
         let updated = db.get_debrief(debrief.id).unwrap();
         assert_eq!(updated.status, "reviewed");
+    }
+
+    #[test]
+    fn test_mark_reviewed_not_found() {
+        let (db, _) = setup();
+        let result = db.mark_debrief_reviewed(9999);
+        assert!(matches!(result, Err(DbError::NotFound)));
+    }
+
+    #[test]
+    fn test_get_debrief_not_found() {
+        let (db, _) = setup();
+        let result = db.get_debrief(9999);
+        assert!(matches!(result, Err(DbError::NotFound)));
     }
 
     #[test]

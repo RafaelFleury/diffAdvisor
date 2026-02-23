@@ -87,7 +87,7 @@ fn test_full_workflow() {
             "concepts/security",
             "/kb/concepts/security/Rate Limiting.md",
             true,
-            "security,rate-limiting,brute-force",
+            &["security".into(), "rate-limiting".into(), "brute-force".into()],
         )
         .unwrap();
     assert_eq!(note.title, "Rate Limiting");

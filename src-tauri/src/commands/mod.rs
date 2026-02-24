@@ -1,1 +1,5 @@
-// Phase 3: Tauri IPC command handlers will be implemented here.
+pub mod projects;
+pub mod debriefs;
+pub mod checkpoints;
+pub mod knowledge;
+pub mod settings;

@@ -8,15 +8,15 @@ impl Database {
     pub fn create_gaps(
         &self,
         debrief_id: i64,
-        gaps_data: &[(&str, &str, &str)], // (severity, category, description)
+        gaps_data: &[(&str, &str, &str, &str, &str)], // (severity, category, description, explanation, suggestion)
     ) -> DbResult<Vec<Gap>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "INSERT INTO gaps (debrief_id, severity, category, description) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO gaps (debrief_id, severity, category, description, explanation, suggestion) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
         let mut ids = Vec::new();
-        for (severity, category, description) in gaps_data {
-            stmt.execute(params![debrief_id, severity, category, description])?;
+        for (severity, category, description, explanation, suggestion) in gaps_data {
+            stmt.execute(params![debrief_id, severity, category, description, explanation, suggestion])?;
             ids.push(conn.last_insert_rowid());
         }
         drop(stmt);
@@ -32,7 +32,7 @@ impl Database {
     fn get_gap(&self, id: i64) -> DbResult<Gap> {
         let conn = self.conn();
         conn.query_row(
-            "SELECT id, debrief_id, severity, category, description, resolved, created_at FROM gaps WHERE id = ?1",
+            "SELECT id, debrief_id, severity, category, description, explanation, suggestion, resolved, created_at FROM gaps WHERE id = ?1",
             params![id],
             |row| Ok(Self::row_to_gap(row)),
         )
@@ -45,7 +45,7 @@ impl Database {
     pub fn get_gaps_by_debrief(&self, debrief_id: i64) -> DbResult<Vec<Gap>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, debrief_id, severity, category, description, resolved, created_at FROM gaps WHERE debrief_id = ?1 ORDER BY created_at",
+            "SELECT id, debrief_id, severity, category, description, explanation, suggestion, resolved, created_at FROM gaps WHERE debrief_id = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map(params![debrief_id], |row| Ok(Self::row_to_gap(row)))?;
         let mut gaps = Vec::new();
@@ -58,7 +58,7 @@ impl Database {
     pub fn get_unresolved_gaps_by_project(&self, project_id: i64) -> DbResult<Vec<Gap>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT g.id, g.debrief_id, g.severity, g.category, g.description, g.resolved, g.created_at
+            "SELECT g.id, g.debrief_id, g.severity, g.category, g.description, g.explanation, g.suggestion, g.resolved, g.created_at
              FROM gaps g
              JOIN debriefs d ON g.debrief_id = d.id
              WHERE d.project_id = ?1 AND g.resolved = 0
@@ -101,8 +101,10 @@ impl Database {
             severity: row.get(2).unwrap_or_default(),
             category: row.get(3).unwrap_or_default(),
             description: row.get(4).unwrap_or_default(),
-            resolved: row.get::<_, i32>(5).unwrap_or(0) != 0,
-            created_at: row.get(6).unwrap(),
+            explanation: row.get(5).unwrap_or_default(),
+            suggestion: row.get(6).unwrap_or_default(),
+            resolved: row.get::<_, i32>(7).unwrap_or(0) != 0,
+            created_at: row.get(8).unwrap(),
         }
     }
 }
@@ -136,14 +138,16 @@ mod tests {
             .create_gaps(
                 debrief_id,
                 &[
-                    ("critical", "security", "No auth"),
-                    ("warning", "performance", "N+1 query"),
-                    ("info", "maintainability", "Consider refactoring"),
+                    ("critical", "security", "No auth", "Auth is required for production", "Add JWT middleware"),
+                    ("warning", "performance", "N+1 query", "Causes slow queries", "Use eager loading"),
+                    ("info", "maintainability", "Consider refactoring", "Code is hard to read", "Extract helper function"),
                 ],
             )
             .unwrap();
         assert_eq!(gaps.len(), 3);
         assert_eq!(gaps[0].severity, "critical");
+        assert_eq!(gaps[0].explanation, "Auth is required for production");
+        assert_eq!(gaps[0].suggestion, "Add JWT middleware");
         assert_eq!(gaps[1].severity, "warning");
         assert_eq!(gaps[2].severity, "info");
     }
@@ -152,7 +156,7 @@ mod tests {
     fn test_resolve_gap() {
         let (db, debrief_id) = setup();
         let gaps = db
-            .create_gaps(debrief_id, &[("critical", "security", "No auth")])
+            .create_gaps(debrief_id, &[("critical", "security", "No auth", "Why it matters", "Fix it")])
             .unwrap();
         assert!(!gaps[0].resolved);
 
@@ -167,8 +171,8 @@ mod tests {
         db.create_gaps(
             debrief_id,
             &[
-                ("critical", "security", "No auth"),
-                ("warning", "performance", "Slow query"),
+                ("critical", "security", "No auth", "", ""),
+                ("warning", "performance", "Slow query", "", ""),
             ],
         )
         .unwrap();
@@ -183,8 +187,8 @@ mod tests {
             .create_gaps(
                 debrief_id,
                 &[
-                    ("critical", "security", "No auth"),
-                    ("warning", "performance", "Slow query"),
+                    ("critical", "security", "No auth", "", ""),
+                    ("warning", "performance", "Slow query", "", ""),
                 ],
             )
             .unwrap();

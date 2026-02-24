@@ -1,6 +1,7 @@
 pub mod db;
+pub mod services;
 
 #[cfg(feature = "tauri-app")]
-pub mod commands;
+pub mod state;
 #[cfg(feature = "tauri-app")]
-pub mod services;
+pub mod commands;

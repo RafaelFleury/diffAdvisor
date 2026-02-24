@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use super::error::{DbError, DbResult};
 
-const CURRENT_VERSION: i32 = 1;
+const CURRENT_VERSION: i32 = 2;
 
 pub fn run_migrations(conn: &Connection) -> DbResult<()> {
     conn.execute_batch(
@@ -21,6 +21,10 @@ pub fn run_migrations(conn: &Connection) -> DbResult<()> {
 
     if version < 1 {
         migration_001(conn)?;
+    }
+
+    if version < 2 {
+        migration_002(conn)?;
     }
 
     if version < CURRENT_VERSION {
@@ -115,6 +119,20 @@ fn migration_001(conn: &Connection) -> DbResult<()> {
 
     seed_default_settings(conn)?;
 
+    Ok(())
+}
+
+fn migration_002(conn: &Connection) -> DbResult<()> {
+    conn.execute_batch(
+        "
+        ALTER TABLE gaps ADD COLUMN explanation TEXT NOT NULL DEFAULT '';
+        ALTER TABLE gaps ADD COLUMN suggestion TEXT NOT NULL DEFAULT '';
+        ALTER TABLE knowledge_notes ADD COLUMN source_debrief_id INTEGER REFERENCES debriefs(id) ON DELETE SET NULL;
+        ALTER TABLE knowledge_notes ADD COLUMN source_commit TEXT;
+        ALTER TABLE knowledge_notes ADD COLUMN links_to TEXT NOT NULL DEFAULT '[]';
+        ",
+    )
+    .map_err(|e| DbError::MigrationError(e.to_string()))?;
     Ok(())
 }
 

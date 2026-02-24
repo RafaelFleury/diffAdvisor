@@ -224,7 +224,7 @@ mod tests {
 
         db.create_gaps(
             debrief.id,
-            &[("critical", "security", "No auth")],
+            &[("critical", "security", "No auth", "", "")],
         )
         .unwrap();
         db.create_checkpoint_response(debrief.id, "q1", "What is?", "My answer", "free_text")

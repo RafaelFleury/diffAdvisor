@@ -1073,6 +1073,11 @@ export class MockKnowledgeService implements IKnowledgeService {
         n.content.toLowerCase().includes(q)
     )
   }
+
+  async writeToKb(_debriefId: string, _noteIndices: number[]): Promise<KnowledgeNote[]> {
+    await delay()
+    return []
+  }
 }
 
 export class MockSettingsService implements ISettingsService {

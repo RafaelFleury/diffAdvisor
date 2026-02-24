@@ -37,9 +37,9 @@ fn test_full_workflow() {
         .create_gaps(
             debrief.id,
             &[
-                ("critical", "security", "No rate limiting on login endpoint"),
-                ("warning", "security", "Password not hashed with bcrypt"),
-                ("info", "maintainability", "Consider extracting auth middleware"),
+                ("critical", "security", "No rate limiting on login endpoint", "Attackers can brute-force passwords", "Add rate limiting middleware"),
+                ("warning", "security", "Password not hashed with bcrypt", "SHA-256 is too fast for password hashing", "Use bcrypt or argon2"),
+                ("info", "maintainability", "Consider extracting auth middleware", "", ""),
             ],
         )
         .unwrap();
@@ -88,6 +88,9 @@ fn test_full_workflow() {
             "/kb/concepts/security/Rate Limiting.md",
             true,
             &["security".into(), "rate-limiting".into(), "brute-force".into()],
+            None,
+            None,
+            &[],
         )
         .unwrap();
     assert_eq!(note.title, "Rate Limiting");

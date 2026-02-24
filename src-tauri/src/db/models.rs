@@ -35,6 +35,8 @@ pub struct Gap {
     pub severity: String,
     pub category: String,
     pub description: String,
+    pub explanation: String,
+    pub suggestion: String,
     pub resolved: bool,
     pub created_at: String,
 }
@@ -62,6 +64,9 @@ pub struct KnowledgeNote {
     pub file_path: String,
     pub auto_generated: bool,
     pub tags: Vec<String>,
+    pub source_debrief_id: Option<i64>,
+    pub source_commit: Option<String>,
+    pub links_to: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }

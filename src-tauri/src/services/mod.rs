@@ -1,1 +1,6 @@
-// Phase 3: Business logic services will be implemented here.
+pub mod git;
+pub mod ai;
+pub mod context;
+pub mod skills;
+pub mod knowledge;
+pub mod watcher;

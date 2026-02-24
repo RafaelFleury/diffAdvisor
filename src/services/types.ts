@@ -43,6 +43,7 @@ export interface IKnowledgeService {
   saveNote(note: Partial<KnowledgeNote> & { title: string; content: string; categoryPath: string }): Promise<KnowledgeNote>
   deleteNote(noteId: string): Promise<void>
   searchNotes(query: string): Promise<KnowledgeNote[]>
+  writeToKb(debriefId: string, noteIndices: number[]): Promise<KnowledgeNote[]>
 }
 
 export interface ISettingsService {

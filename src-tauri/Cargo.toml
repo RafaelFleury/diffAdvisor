@@ -10,6 +10,11 @@ rusqlite = { version = "0.34", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 tauri = { version = "2", features = [], optional = true }
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+notify = "6"
+serde_yaml = "0.9"
+dirs = "5"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

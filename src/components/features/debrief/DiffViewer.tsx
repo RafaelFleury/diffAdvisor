@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FileDiff } from '@/types/index.ts'
 
 interface DiffViewerProps {
@@ -7,6 +7,16 @@ interface DiffViewerProps {
 
 export default function DiffViewer({ files }: DiffViewerProps) {
   const [activeFileIdx, setActiveFileIdx] = useState(0)
+
+  useEffect(() => {
+    if (files.length === 0) {
+      setActiveFileIdx(0)
+      return
+    }
+
+    setActiveFileIdx((idx) => Math.min(idx, files.length - 1))
+  }, [files])
+
   const activeFile = files[activeFileIdx]
 
   if (!activeFile) {

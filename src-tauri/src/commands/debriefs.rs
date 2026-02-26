@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use tauri::State;
 
 use crate::db::models::{Debrief, Gap};
@@ -226,11 +227,26 @@ pub async fn run_debrief(
     project_id: i64,
     commit_hash: String,
 ) -> Result<DebriefDto, String> {
+    let flow_start = Instant::now();
+    eprintln!(
+        "[debrief] run_debrief started project_id={} commit_hash={}",
+        project_id, commit_hash
+    );
+
     // 1. Check if debrief already exists
     {
         let db = state.db();
         if let Ok(Some(existing)) = db.get_debrief_by_commit(project_id, &commit_hash) {
+            eprintln!(
+                "[debrief] existing debrief found in cache debrief_id={} commit_hash={}",
+                existing.id, existing.commit_hash
+            );
             let gaps = db.get_gaps_by_debrief(existing.id).unwrap_or_default();
+            eprintln!(
+                "[debrief] run_debrief completed from cache gap_count={} total_elapsed_ms={}",
+                gaps.len(),
+                flow_start.elapsed().as_millis()
+            );
             return Ok(debrief_to_dto(&existing, &gaps));
         }
     }
@@ -243,6 +259,11 @@ pub async fn run_debrief(
             .map_err(|e| format!("Project not found: {}", e))?;
         (project.path.clone(), project.active_skills.clone())
     };
+    eprintln!(
+        "[debrief] project context loaded path={} active_skills={}",
+        project_path,
+        project_active_skills.len()
+    );
 
     // 3. Get settings
     let (ai_config, analysis_depth, checkpoint_mode, ignored_paths_str) = {
@@ -267,12 +288,20 @@ pub async fn run_debrief(
             ignored,
         )
     };
+    eprintln!(
+        "[debrief] settings loaded endpoint={} model={} analysis_depth={} checkpoint_mode={}",
+        ai_config.endpoint_url,
+        ai_config.model,
+        analysis_depth,
+        checkpoint_mode
+    );
 
     if ai_config.endpoint_url.is_empty() || ai_config.model.is_empty() {
         return Err("AI endpoint URL and model must be configured in Settings".to_string());
     }
 
     // 4. Get commit diff
+    let diff_step_start = Instant::now();
     let diff = git::get_commit_diff(&project_path, &commit_hash)?;
     let commit_info = git::list_recent_commits(&project_path, 50)?
         .into_iter()
@@ -281,6 +310,13 @@ pub async fn run_debrief(
 
     let file_diffs = git::parse_diff_to_file_diffs(&diff);
     let changed_files: Vec<String> = file_diffs.iter().map(|f| f.file_name.clone()).collect();
+    eprintln!(
+        "[debrief] commit diff loaded commit_hash={} files={} diff_bytes={} elapsed_ms={}",
+        commit_hash,
+        file_diffs.len(),
+        diff.len(),
+        diff_step_start.elapsed().as_millis()
+    );
 
     // 5. Load and detect skills
     let all_skills = skills::load_all_skills().unwrap_or_default();
@@ -295,6 +331,12 @@ pub async fn run_debrief(
         &diff,
         &commit_info.message,
         &changed_files,
+    );
+    eprintln!(
+        "[debrief] skills resolved manual={} auto={} total_available={}",
+        manual_skills.len(),
+        auto_skills.len(),
+        all_skills.len()
     );
 
     // 6. Build context
@@ -355,13 +397,45 @@ pub async fn run_debrief(
         &diff,
         system_tokens,
     );
+    eprintln!(
+        "[debrief] prompt context assembled system_tokens={} user_chars={} history_items={} reductions={}",
+        system_tokens,
+        user_message.len(),
+        history.len(),
+        reduction_log.len()
+    );
 
     // 7. Call AI
-    let debrief_result = ai::run_debrief(&ai_config, &system_message, &user_message)
-        .await
-        .map_err(|e| format!("AI debrief failed: {}", e))?;
+    let llm_step_start = Instant::now();
+    eprintln!(
+        "[debrief] calling LLM endpoint={} model={} commit_hash={}",
+        ai_config.endpoint_url, ai_config.model, commit_hash
+    );
+    let debrief_result = match ai::run_debrief(&ai_config, &system_message, &user_message).await {
+        Ok(result) => {
+            eprintln!(
+                "[debrief] LLM response received elapsed_ms={}",
+                llm_step_start.elapsed().as_millis()
+            );
+            result
+        }
+        Err(e) => {
+            eprintln!(
+                "[debrief] LLM call failed elapsed_ms={} error={}",
+                llm_step_start.elapsed().as_millis(),
+                e
+            );
+            return Err(format!("AI debrief failed: {}", e));
+        }
+    };
 
     let ai_response = debrief_result.response;
+    eprintln!(
+        "[debrief] LLM response parsed gaps={} questions={} notes={}",
+        ai_response.gaps.len(),
+        ai_response.checkpoint_questions.len(),
+        ai_response.suggested_notes.len()
+    );
 
     // Serialize AI response and embed context_reduction_log
     let ai_response_json = {
@@ -421,6 +495,12 @@ pub async fn run_debrief(
     let _ = db.update_project_last_analyzed(project_id);
 
     // 9. Return DTO
+    eprintln!(
+        "[debrief] run_debrief completed debrief_id={} gap_count={} total_elapsed_ms={}",
+        debrief.id,
+        gaps.len(),
+        flow_start.elapsed().as_millis()
+    );
     Ok(debrief_to_dto(&debrief, &gaps))
 }
 
@@ -430,13 +510,26 @@ pub async fn get_diff_content(
     project_id: i64,
     commit_hash: String,
 ) -> Result<Vec<git::FileDiff>, String> {
+    let started_at = Instant::now();
+    eprintln!(
+        "[debrief] get_diff_content started project_id={} commit_hash={}",
+        project_id, commit_hash
+    );
     let db = state.db();
     let project = db
         .get_project(project_id)
         .map_err(|e| format!("Project not found: {}", e))?;
 
     let diff = git::get_commit_diff(&project.path, &commit_hash)?;
-    Ok(git::parse_diff_to_file_diffs(&diff))
+    let files = git::parse_diff_to_file_diffs(&diff);
+    eprintln!(
+        "[debrief] get_diff_content completed commit_hash={} files={} diff_bytes={} elapsed_ms={}",
+        commit_hash,
+        files.len(),
+        diff.len(),
+        started_at.elapsed().as_millis()
+    );
+    Ok(files)
 }
 
 #[tauri::command]

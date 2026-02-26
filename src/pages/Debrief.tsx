@@ -13,6 +13,8 @@ export default function Debrief() {
     currentDebrief,
     diffFiles,
     debriefLoading,
+    error,
+    rawDebriefText,
     answers,
     loadDebrief,
     markReviewed,
@@ -71,7 +73,7 @@ export default function Debrief() {
     )
   }
 
-  if (debriefLoading) {
+  if (debriefLoading && !currentDebrief && !rawDebriefText && diffFiles.length === 0) {
     return (
       <div
         className="font-mono"
@@ -188,9 +190,26 @@ export default function Debrief() {
               answers={answers}
               onSubmitAnswer={handleSubmitAnswer}
             />
+          ) : rawDebriefText ? (
+            <div style={{ height: '100%', overflow: 'auto' }}>
+              <pre
+                className="font-mono"
+                style={{
+                  margin: 0,
+                  padding: 20,
+                  fontSize: 12.5,
+                  lineHeight: 1.5,
+                  color: 'var(--text-secondary)',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {rawDebriefText}
+              </pre>
+            </div>
           ) : (
             <div className="font-mono" style={{ padding: 20, fontSize: 13, color: 'var(--text-tertiary)' }}>
-              Loading debrief...
+              {error ? `Failed to load debrief: ${error}` : 'Debrief unavailable for this commit.'}
             </div>
           )
         }

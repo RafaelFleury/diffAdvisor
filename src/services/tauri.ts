@@ -59,12 +59,21 @@ export class TauriDebriefService implements IDebriefService {
   }
 
   async runDebrief(commitHash: string): Promise<DebriefResult> {
+    const startedAt = performance.now()
     const project = await invoke<Project | null>('get_active_project')
     if (!project) throw new Error('No active project set')
-    return invoke<DebriefResult>('run_debrief', {
+    console.info('[tauri] invoke run_debrief', { projectId: project.id, commitHash })
+    const result = await invoke<DebriefResult>('run_debrief', {
       projectId: parseInt(project.id),
       commitHash,
     })
+    console.info('[tauri] run_debrief completed', {
+      projectId: project.id,
+      commitHash,
+      debriefId: result.id,
+      elapsedMs: Math.round(performance.now() - startedAt),
+    })
+    return result
   }
 
   markReviewed(debriefId: string): Promise<void> {
@@ -72,12 +81,21 @@ export class TauriDebriefService implements IDebriefService {
   }
 
   async getDiffContent(commitHash: string): Promise<FileDiff[]> {
+    const startedAt = performance.now()
     const project = await invoke<Project | null>('get_active_project')
     if (!project) return []
-    return invoke<FileDiff[]>('get_diff_content', {
+    console.info('[tauri] invoke get_diff_content', { projectId: project.id, commitHash })
+    const files = await invoke<FileDiff[]>('get_diff_content', {
       projectId: parseInt(project.id),
       commitHash,
     })
+    console.info('[tauri] get_diff_content completed', {
+      projectId: project.id,
+      commitHash,
+      fileCount: files.length,
+      elapsedMs: Math.round(performance.now() - startedAt),
+    })
+    return files
   }
 
   getGapCount(projectId: string): Promise<number> {

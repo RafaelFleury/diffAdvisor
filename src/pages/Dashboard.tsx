@@ -109,7 +109,13 @@ export default function Dashboard() {
                 <CommitCard
                   key={commit.hash}
                   commit={commit}
-                  onClick={() => navigate(`/debrief/${commit.hash}`)}
+                  onClick={() => {
+                    console.info('[dashboard] commit selected', {
+                      commitHash: commit.hash,
+                      message: commit.message,
+                    })
+                    navigate(`/debrief/${commit.hash}`)
+                  }}
                 />
               ))
             )}

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import Toggle from '@/components/ui/Toggle.tsx'
 import type { AppSettings } from '@/types/index.ts'
 
@@ -5,7 +6,7 @@ interface AIProviderSettingsProps {
   settings: AppSettings
   connectionTestResult: { success: boolean; message: string } | null
   onUpdate: (partial: Partial<AppSettings>) => void
-  onTestConnection: () => void
+  onTestConnection: () => void | Promise<void>
 }
 
 const labelStyle: React.CSSProperties = {
@@ -50,6 +51,25 @@ const rowStyle: React.CSSProperties = {
 }
 
 export default function AIProviderSettings({ settings, connectionTestResult, onUpdate, onTestConnection }: AIProviderSettingsProps) {
+  const [testingConnection, setTestingConnection] = useState(false)
+
+  const handleTestConnection = async () => {
+    if (testingConnection) return
+    setTestingConnection(true)
+    try {
+      await onTestConnection()
+    } finally {
+      setTestingConnection(false)
+    }
+  }
+
+  const statusMessage = testingConnection ? 'Testing connection...' : connectionTestResult?.message
+  const statusColor = testingConnection
+    ? 'var(--warning)'
+    : connectionTestResult?.success
+      ? 'var(--success)'
+      : 'var(--critical)'
+
   return (
     <>
       <div style={rowStyle}>
@@ -74,14 +94,24 @@ export default function AIProviderSettings({ settings, connectionTestResult, onU
         <span style={labelStyle}>API Key</span>
         <div style={{ flex: 1, display: 'flex', gap: 8 }}>
           <input style={inputStyle} type="password" value={settings.ai.apiKey} onChange={(e) => onUpdate({ ai: { ...settings.ai, apiKey: e.target.value } })} />
-          <button style={auxButtonStyle} onClick={onTestConnection}>Test</button>
+          <button
+            style={{
+              ...auxButtonStyle,
+              opacity: testingConnection ? 0.65 : 1,
+              cursor: testingConnection ? 'not-allowed' : 'pointer',
+            }}
+            onClick={() => void handleTestConnection()}
+            disabled={testingConnection}
+          >
+            {testingConnection ? 'Testing...' : 'Test'}
+          </button>
         </div>
       </div>
-      {connectionTestResult && (
+      {statusMessage && (
         <div style={{ ...rowStyle, borderBottom: 'none' }}>
           <span style={labelStyle} />
-          <span className="font-mono" style={{ fontSize: 12, color: connectionTestResult.success ? 'var(--success)' : 'var(--critical)' }}>
-            {connectionTestResult.message}
+          <span className="font-mono" style={{ fontSize: 12, color: statusColor }}>
+            {statusMessage}
           </span>
         </div>
       )}

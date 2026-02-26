@@ -5,6 +5,8 @@ export interface CheckpointQuestion {
   question: string
   concept: string
   goodAnswerIncludes: string
+  options?: string[]
+  correctOptionIndex?: number
 }
 
 export interface CheckpointResponse {

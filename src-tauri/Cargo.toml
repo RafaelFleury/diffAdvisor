@@ -10,6 +10,7 @@ rusqlite = { version = "0.34", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 tauri = { version = "2", features = [], optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 notify = "6"
@@ -21,7 +22,7 @@ tauri-build = { version = "2", features = [] }
 
 [features]
 default = ["tauri-app"]
-tauri-app = ["dep:tauri"]
+tauri-app = ["dep:tauri", "dep:tauri-plugin-dialog"]
 
 [dev-dependencies]
 tempfile = "3"

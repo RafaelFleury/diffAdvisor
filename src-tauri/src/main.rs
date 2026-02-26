@@ -2,9 +2,11 @@
 
 use std::path::PathBuf;
 
+use tauri::Manager;
 use diffadvisor_lib::db::Database;
 use diffadvisor_lib::state::AppState;
 use diffadvisor_lib::commands;
+use diffadvisor_lib::services::watcher;
 
 fn main() {
     let db_path = get_db_path();
@@ -19,7 +21,27 @@ fn main() {
     let state = AppState::new(db);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
+        .setup(|app| {
+            let state = app.state::<AppState>();
+            let project_path = {
+                let db = state.db();
+                db.get_setting("active_project_id")
+                    .ok()
+                    .flatten()
+                    .and_then(|id_str| id_str.parse::<i64>().ok())
+                    .and_then(|id| db.get_project(id).ok())
+                    .map(|p| p.path.clone())
+            };
+            if let Some(path) = project_path {
+                let handle = app.handle().clone();
+                if let Ok(w) = watcher::start_watcher(path, handle) {
+                    state.set_watcher(Some(w));
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::projects::add_project,
             commands::projects::list_projects,

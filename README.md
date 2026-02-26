@@ -34,6 +34,45 @@ pnpm build          # frontend
 pnpm tauri build    # full desktop app
 ```
 
+## Running the Application After Build
+
+You will find the packaged desktop application in the `src-tauri/target/release/bundle` directory. The exact subdirectory may depend on your operating system (`appimage` for Linux, `dmg` for macOS, or `msi` for Windows).
+
+To run the built application:
+
+### On Linux
+
+Navigate to the `appimage` directory and execute the generated `.AppImage` file:
+
+```bash
+cd src-tauri/target/release/bundle/appimage
+./diffAdvisor_*_amd64.AppImage
+```
+
+### On macOS
+
+Navigate to the `dmg` directory and open the `.dmg` file:
+
+```bash
+cd src-tauri/target/release/bundle/dmg
+open diffAdvisor_*.dmg
+```
+Then, drag the application to your Applications folder and launch it like any other macOS app.
+
+### On Windows
+
+Navigate to the `msi` directory and double-click the `.msi` installer:
+
+```bash
+cd src-tauri/target/release/bundle/msi
+diffAdvisor_*.msi
+```
+Follow the installer prompts to complete installation, then launch the app from your Start Menu.
+
+Refer to the [Tauri distribution documentation](https://tauri.app/v2/guides/distribution/) for advanced usage and troubleshooting.
+
+
+
 ## Tests
 
 Rust (database layer):

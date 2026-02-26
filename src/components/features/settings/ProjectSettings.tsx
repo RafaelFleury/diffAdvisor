@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import type { AppSettings } from '@/types/index.ts'
+import { projectService } from '@/services/index.ts'
+import { useProjectStore } from '@/stores/projectStore.ts'
 
 interface ProjectSettingsProps {
   settings: AppSettings
@@ -47,13 +50,112 @@ const rowStyle: React.CSSProperties = {
 }
 
 export default function ProjectSettings({ settings, onUpdate }: ProjectSettingsProps) {
+  const [browseError, setBrowseError] = useState<string | null>(null)
+  const [browsing, setBrowsing] = useState(false)
+  const isTauri = '__TAURI_INTERNALS__' in window
+
+  const normalizePath = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) return ''
+    if (trimmed === '/' || /^[A-Za-z]:[\\/]?$/.test(trimmed)) return trimmed
+    return trimmed.replace(/[\\/]+$/, '')
+  }
+
+  const updateMonitoredDirectory = (monitoredDirectory: string) => {
+    onUpdate({ project: { monitoredDirectory } as AppSettings['project'] })
+  }
+
+  const activateOrCreateProject = async (rawPath: string): Promise<string> => {
+    const selectedPath = normalizePath(rawPath)
+    if (!selectedPath) {
+      throw new Error('Project path cannot be empty')
+    }
+
+    const matchesPath = (projectPath: string) => normalizePath(projectPath) === selectedPath
+    const projects = await projectService.getProjects()
+    let project = projects.find((p) => matchesPath(p.path))
+
+    if (!project) {
+      try {
+        project = await projectService.addProject(selectedPath)
+      } catch (error) {
+        // Handles already-tracked repos where creation may fail on unique path.
+        const refreshed = await projectService.getProjects()
+        project = refreshed.find((p) => matchesPath(p.path))
+        if (!project) throw error
+      }
+    }
+
+    await useProjectStore.getState().setActiveProject(project.id)
+    return project.path
+  }
+
+  const handleBrowse = async () => {
+    setBrowseError(null)
+    setBrowsing(true)
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({ directory: true, multiple: false, title: 'Select Project Directory' })
+      if (selected) {
+        const path = Array.isArray(selected) ? selected[0] : selected
+        if (path) {
+          const activePath = await activateOrCreateProject(path)
+          updateMonitoredDirectory(activePath)
+        }
+      }
+    } catch (e) {
+      setBrowseError((e as Error).message)
+    } finally {
+      setBrowsing(false)
+    }
+  }
+
+  const handleManualPath = (path: string) => {
+    updateMonitoredDirectory(path)
+  }
+
+  const handleManualPathBlur = async (rawPath: string) => {
+    if (!isTauri) return
+
+    const path = normalizePath(rawPath)
+    if (!path) return
+
+    setBrowseError(null)
+    setBrowsing(true)
+    try {
+      const activePath = await activateOrCreateProject(path)
+      updateMonitoredDirectory(activePath)
+    } catch (e) {
+      setBrowseError((e as Error).message)
+    } finally {
+      setBrowsing(false)
+    }
+  }
+
   return (
     <>
       <div style={rowStyle}>
         <span style={labelStyle}>Monitored Directory</span>
-        <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-          <input style={inputStyle} value={settings.project.monitoredDirectory} readOnly />
-          <button style={auxButtonStyle}>Browse</button>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              style={inputStyle}
+              value={settings.project.monitoredDirectory}
+              onChange={(e) => handleManualPath(e.target.value)}
+              onBlur={(e) => void handleManualPathBlur(e.target.value)}
+              placeholder="Select or type project path..."
+            />
+            {isTauri && (
+              <button style={auxButtonStyle} onClick={handleBrowse} disabled={browsing}>
+                {browsing ? '...' : 'Browse'}
+              </button>
+            )}
+          </div>
+          {browseError && (
+            <div className="font-mono" style={{ fontSize: 11, color: 'var(--critical)' }}>
+              {browseError}
+            </div>
+          )}
         </div>
       </div>
       <div style={rowStyle}>
@@ -61,7 +163,7 @@ export default function ProjectSettings({ settings, onUpdate }: ProjectSettingsP
         <input
           style={inputStyle}
           value={settings.project.fileExtensions}
-          onChange={(e) => onUpdate({ project: { ...settings.project, fileExtensions: e.target.value } })}
+          onChange={(e) => onUpdate({ project: { fileExtensions: e.target.value } as AppSettings['project'] })}
         />
       </div>
       <div style={{ ...rowStyle, borderBottom: 'none', alignItems: 'flex-start' }}>

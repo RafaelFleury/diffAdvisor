@@ -8,7 +8,7 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebriefDto {
-    pub id: i64,
+    pub id: String,
     pub commit_hash: String,
     pub commit_message: String,
     pub architectural_summary: String,
@@ -46,6 +46,32 @@ pub struct CheckpointQuestionDto {
     pub correct_option_index: Option<u32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDto {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub timestamp: String,
+    pub files_changed: i32,
+    pub additions: i32,
+    pub deletions: i32,
+    pub status: String,
+}
+
+fn commit_info_to_dto(ci: &git::CommitInfo, status: &str) -> CommitDto {
+    CommitDto {
+        hash: ci.hash.clone(),
+        message: ci.message.clone(),
+        author: ci.author.clone(),
+        timestamp: ci.timestamp.clone(),
+        files_changed: ci.files_changed,
+        additions: ci.additions,
+        deletions: ci.deletions,
+        status: status.to_string(),
+    }
+}
+
 fn debrief_to_dto(debrief: &Debrief, gaps: &[Gap]) -> DebriefDto {
     let ai_response: Option<ai::DebriefResponse> = debrief
         .ai_response_json
@@ -65,7 +91,7 @@ fn debrief_to_dto(debrief: &Debrief, gaps: &[Gap]) -> DebriefDto {
         .collect();
 
     DebriefDto {
-        id: debrief.id,
+        id: debrief.id.to_string(),
         commit_hash: debrief.commit_hash.clone(),
         commit_message: debrief.commit_message.clone(),
         architectural_summary: ai_response
@@ -113,7 +139,7 @@ fn debrief_to_dto(debrief: &Debrief, gaps: &[Gap]) -> DebriefDto {
 pub async fn get_pending_commits(
     state: State<'_, AppState>,
     project_id: i64,
-) -> Result<Vec<git::CommitInfo>, String> {
+) -> Result<Vec<CommitDto>, String> {
     let db = state.db();
     let project = db
         .get_project(project_id)
@@ -127,9 +153,10 @@ pub async fn get_pending_commits(
         .map_err(|e| format!("Failed to list debriefs: {}", e))?;
     let reviewed_hashes: Vec<String> = reviewed_debriefs.iter().map(|d| d.commit_hash.clone()).collect();
 
-    let pending: Vec<git::CommitInfo> = all_commits
-        .into_iter()
+    let pending: Vec<CommitDto> = all_commits
+        .iter()
         .filter(|c| !reviewed_hashes.contains(&c.hash))
+        .map(|c| commit_info_to_dto(c, "pending"))
         .collect();
 
     Ok(pending)
@@ -139,7 +166,7 @@ pub async fn get_pending_commits(
 pub async fn get_reviewed_commits(
     state: State<'_, AppState>,
     project_id: i64,
-) -> Result<Vec<git::CommitInfo>, String> {
+) -> Result<Vec<CommitDto>, String> {
     let db = state.db();
     let project = db
         .get_project(project_id)
@@ -151,12 +178,11 @@ pub async fn get_reviewed_commits(
 
     let mut commits = Vec::new();
     for debrief in reviewed_debriefs {
-        // Try to get commit info from git
         let recent = git::list_recent_commits(&project.path, 100).unwrap_or_default();
-        if let Some(ci) = recent.into_iter().find(|c| c.hash == debrief.commit_hash) {
-            commits.push(ci);
+        if let Some(ci) = recent.iter().find(|c| c.hash == debrief.commit_hash) {
+            commits.push(commit_info_to_dto(ci, "reviewed"));
         } else {
-            commits.push(git::CommitInfo {
+            commits.push(CommitDto {
                 hash: debrief.commit_hash,
                 message: debrief.commit_message,
                 author: String::new(),
@@ -164,6 +190,7 @@ pub async fn get_reviewed_commits(
                 files_changed: 0,
                 additions: 0,
                 deletions: 0,
+                status: "reviewed".to_string(),
             });
         }
     }

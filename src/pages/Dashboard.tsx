@@ -12,10 +12,31 @@ export default function Dashboard() {
   const { activeProject, loadActiveProject } = useProjectStore()
 
   useEffect(() => {
-    loadActiveProject()
-    loadCommits('proj-1')
-    loadGapCount('proj-1')
+    loadActiveProject().then(() => {
+      const { activeProject } = useProjectStore.getState()
+      if (activeProject) {
+        loadCommits(activeProject.id)
+        loadGapCount(activeProject.id)
+      }
+    })
   }, [loadActiveProject, loadCommits, loadGapCount])
+
+  // Listen for commit_detected events from the Tauri watcher
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return
+    let unlisten: (() => void) | undefined
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      listen('commit_detected', () => {
+        const { activeProject } = useProjectStore.getState()
+        if (activeProject) loadCommits(activeProject.id)
+      }).then((fn) => {
+        unlisten = fn
+      })
+    })
+    return () => {
+      if (unlisten) unlisten()
+    }
+  }, [loadCommits])
 
   return (
     <div style={{ padding: '32px 40px', maxWidth: 960, margin: '0 auto' }}>

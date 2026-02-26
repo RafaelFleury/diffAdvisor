@@ -13,7 +13,7 @@ import {
   TauriSettingsService,
 } from './tauri.ts'
 
-const USE_MOCK = import.meta.env.DEV
+const USE_MOCK = !('__TAURI_INTERNALS__' in window)
 
 export const projectService = USE_MOCK ? new MockProjectService() : new TauriProjectService()
 export const debriefService = USE_MOCK ? new MockDebriefService() : new TauriDebriefService()

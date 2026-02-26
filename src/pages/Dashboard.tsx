@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDebriefStore } from '@/stores/debriefStore.ts'
 import { useProjectStore } from '@/stores/projectStore.ts'
+import { IS_MOCK_SERVICES } from '@/services/index.ts'
 import StatCard from '@/components/ui/StatCard.tsx'
 import CommitCard from '@/components/ui/CommitCard.tsx'
 
@@ -23,6 +24,7 @@ export default function Dashboard() {
 
   // Listen for commit_detected events from the Tauri watcher
   useEffect(() => {
+    if (IS_MOCK_SERVICES) return
     if (!('__TAURI_INTERNALS__' in window)) return
     let unlisten: (() => void) | undefined
     import('@tauri-apps/api/event').then(({ listen }) => {
@@ -141,7 +143,17 @@ export default function Dashboard() {
               </div>
             ) : (
               reviewedCommits.map((commit) => (
-                <CommitCard key={commit.hash} commit={commit} />
+                <CommitCard
+                  key={commit.hash}
+                  commit={commit}
+                  onClick={() => {
+                    console.info('[dashboard] reviewed commit selected', {
+                      commitHash: commit.hash,
+                      message: commit.message,
+                    })
+                    navigate(`/debrief/${commit.hash}`)
+                  }}
+                />
               ))
             )}
           </div>

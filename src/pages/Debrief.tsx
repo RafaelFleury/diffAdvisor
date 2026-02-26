@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDebriefStore } from '@/stores/debriefStore.ts'
+import { knowledgeService } from '@/services/index.ts'
 import DiffViewer from '@/components/features/debrief/DiffViewer.tsx'
 import DebriefPanel from '@/components/features/debrief/DebriefPanel.tsx'
 import ResizablePanel from '@/components/features/debrief/ResizablePanel.tsx'
@@ -21,6 +22,7 @@ export default function Debrief() {
     submitAnswer,
     clearDebrief,
   } = useDebriefStore()
+  const [savingToKb, setSavingToKb] = useState(false)
 
   useEffect(() => {
     if (commitHash) {
@@ -37,8 +39,31 @@ export default function Debrief() {
     }
   }
 
-  const handleSaveToKB = () => {
-    toast.success('Saved to Knowledge Base')
+  const handleSaveToKB = async () => {
+    if (!currentDebrief) {
+      toast.error('Debrief is not loaded yet')
+      return
+    }
+
+    const noteIndices = currentDebrief.knowledgeBaseNotes.map((_, idx) => idx)
+    if (noteIndices.length === 0) {
+      toast('No suggested notes available for this debrief')
+      return
+    }
+
+    setSavingToKb(true)
+    try {
+      const created = await knowledgeService.writeToKb(currentDebrief.id, noteIndices)
+      if (created.length === 0) {
+        toast.error('No notes were written to Knowledge Base')
+        return
+      }
+      toast.success(`Saved ${created.length} note${created.length > 1 ? 's' : ''} to Knowledge Base`)
+    } catch (e) {
+      toast.error(`Failed to save to Knowledge Base: ${(e as Error).message}`)
+    } finally {
+      setSavingToKb(false)
+    }
   }
 
   const handleSubmitAnswer = async (questionId: string, answer: string) => {
@@ -134,7 +159,7 @@ export default function Debrief() {
         {/* Right */}
         <div style={{ display: 'flex', gap: 8 }}>
           <button
-            onClick={handleSaveToKB}
+            onClick={() => void handleSaveToKB()}
             className="font-mono"
             style={{
               display: 'flex',
@@ -146,14 +171,16 @@ export default function Debrief() {
               padding: '6px 14px',
               borderRadius: 6,
               fontSize: 12,
-              cursor: 'pointer',
+              cursor: savingToKb ? 'not-allowed' : 'pointer',
+              opacity: savingToKb ? 0.65 : 1,
             }}
+            disabled={savingToKb}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
             </svg>
-            Save to KB
+            {savingToKb ? 'Saving...' : 'Save to KB'}
           </button>
           <button
             onClick={handleMarkReviewed}

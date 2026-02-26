@@ -71,6 +71,32 @@ pub fn read_note(path: &Path) -> Result<String, String> {
     fs::read_to_string(path).map_err(|e| format!("Failed to read note {:?}: {}", path, e))
 }
 
+pub fn strip_yaml_frontmatter(content: &str) -> String {
+    let mut lines = content.lines();
+    match lines.next() {
+        Some(first) if first.trim() == "---" => {}
+        _ => return content.to_string(),
+    }
+
+    let mut in_body = false;
+    let mut body_lines = Vec::new();
+    for line in lines {
+        if !in_body && line.trim() == "---" {
+            in_body = true;
+            continue;
+        }
+        if in_body {
+            body_lines.push(line);
+        }
+    }
+
+    if in_body {
+        body_lines.join("\n").trim_start_matches('\n').to_string()
+    } else {
+        content.to_string()
+    }
+}
+
 pub fn list_existing_note_titles(kb_path: &Path) -> Vec<(String, String)> {
     let mut titles = Vec::new();
     walk_kb_dir(kb_path, kb_path, &mut titles);

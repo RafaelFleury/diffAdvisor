@@ -22,7 +22,9 @@ pub struct KnowledgeNoteDto {
 
 fn note_to_dto(note: &KnowledgeNote) -> KnowledgeNoteDto {
     let content = if !note.file_path.is_empty() {
-        std::fs::read_to_string(&note.file_path).unwrap_or_default()
+        kb_service::read_note(std::path::Path::new(&note.file_path))
+            .map(|raw| kb_service::strip_yaml_frontmatter(&raw))
+            .unwrap_or_default()
     } else {
         String::new()
     };
@@ -98,7 +100,8 @@ pub async fn save_note(
         updated: Some(chrono::Utc::now().format("%Y-%m-%d").to_string()),
     };
 
-    kb_service::write_note_atomic(&file_path, &fm, &content)?;
+    let note_body = kb_service::strip_yaml_frontmatter(&content);
+    kb_service::write_note_atomic(&file_path, &fm, &note_body)?;
 
     let file_path_str = file_path.to_string_lossy().to_string();
 
@@ -259,7 +262,8 @@ pub async fn write_to_kb(
                 updated: None,
             };
 
-            kb_service::write_note_atomic(&file_path, &fm, &generated.content)?;
+            let note_body = kb_service::strip_yaml_frontmatter(&generated.content);
+            kb_service::write_note_atomic(&file_path, &fm, &note_body)?;
 
             // Save to DB
             let file_path_str = file_path.to_string_lossy().to_string();

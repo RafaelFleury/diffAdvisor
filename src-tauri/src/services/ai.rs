@@ -102,10 +102,12 @@ pub struct KbNoteInput {
     pub tags: Vec<String>,
     pub links_to: Vec<String>,
     pub existing_content: Option<String>,
+    pub full_debrief_json: String,
     pub diff_snippet: String,
     pub commit_message: String,
     pub project_name: String,
     pub existing_titles: Vec<String>,
+    pub existing_notes_catalog: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,8 +217,9 @@ pub async fn generate_kb_note(
     let system = r#"You are generating an Obsidian-compatible knowledge base note. The note should:
 - Use [[double bracket links]] (Wikilinks) to reference related concepts
 - Link aggressively: if a concept is mentioned, link it
-- Write for the developer's project context, not generic tutorials
-- Include concrete code examples from the analyzed diff when useful
+- Base the note on the full debrief context, but keep the explanation generally useful
+- Mention concrete diff details only when they are clearly supported by the diff/debrief
+- Check existing notes and merge/update concept coverage instead of duplicating content
 - Keep notes concise and scannable
 - Do NOT include YAML frontmatter (the app adds it)
 
@@ -234,16 +237,27 @@ Respond ONLY with valid JSON: {"title": "<note title>", "content": "<markdown bo
         .map(|c| format!("\n\nExisting note content to merge with:\n{}", c))
         .unwrap_or_default();
 
+    let existing_catalog_str = if note_input.existing_notes_catalog.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nExisting KB notes catalog (title :: category):\n{}",
+            note_input.existing_notes_catalog.join("\n")
+        )
+    };
+
     let user = format!(
-        "Generate a knowledge base note.\n\nTitle: {}\nCategory: {}\nTags: {}\nLinks to: {}\nProject: {}\nCommit: {}\n\nRelevant diff snippet:\n```\n{}\n```{}{}",
+        "Generate a knowledge base note.\n\nTitle: {}\nCategory: {}\nTags: {}\nLinks to: {}\nProject: {}\nCommit: {}\n\nFull debrief JSON:\n```json\n{}\n```\n\nRelevant diff snippet:\n```\n{}\n```{}{}{}",
         note_input.title,
         note_input.category,
         note_input.tags.join(", "),
         note_input.links_to.join(", "),
         note_input.project_name,
         note_input.commit_message,
+        note_input.full_debrief_json,
         note_input.diff_snippet,
         existing_titles_str,
+        existing_catalog_str,
         existing_content_str,
     );
 

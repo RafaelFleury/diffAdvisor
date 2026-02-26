@@ -46,6 +46,8 @@ fn note_to_dto(note: &KnowledgeNote) -> KnowledgeNoteDto {
 #[tauri::command]
 pub async fn get_notes(state: State<'_, AppState>) -> Result<Vec<KnowledgeNoteDto>, String> {
     let db = state.db();
+    db.dedupe_knowledge_notes_by_file_path()
+        .map_err(|e| format!("Failed to dedupe notes: {}", e))?;
     let notes = db
         .list_knowledge_notes()
         .map_err(|e| format!("Failed to list notes: {}", e))?;
@@ -139,6 +141,8 @@ pub async fn search_notes(
     query: String,
 ) -> Result<Vec<KnowledgeNoteDto>, String> {
     let db = state.db();
+    db.dedupe_knowledge_notes_by_file_path()
+        .map_err(|e| format!("Failed to dedupe notes: {}", e))?;
     let notes = db
         .search_knowledge_notes(&query)
         .map_err(|e| format!("Failed to search notes: {}", e))?;
@@ -175,6 +179,8 @@ pub async fn write_to_kb(
     // 2. Get settings
     let (kb_path_str, ai_config) = {
         let db = state.db();
+        db.dedupe_knowledge_notes_by_file_path()
+            .map_err(|e| format!("Failed to dedupe notes: {}", e))?;
         let kb_path = db.get_setting("knowledge.storagePath").ok().flatten().unwrap_or_else(|| "~/knowledge_base".to_string());
         let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
         let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
@@ -193,13 +199,25 @@ pub async fn write_to_kb(
 
     let kb_path = kb_service::expand_kb_path(&kb_path_str);
 
-    // 3. Get existing KB titles
-    let existing_titles: Vec<String> = kb_service::list_existing_note_titles(&kb_path)
-        .into_iter()
-        .map(|(title, _)| title)
+    // 3. Get existing KB notes catalog
+    let existing_kb_notes = kb_service::list_existing_note_titles(&kb_path);
+    let existing_titles: Vec<String> = existing_kb_notes
+        .iter()
+        .map(|(title, _)| title.clone())
+        .collect();
+    let existing_notes_catalog: Vec<String> = existing_kb_notes
+        .iter()
+        .map(|(title, category)| {
+            if category.is_empty() {
+                title.clone()
+            } else {
+                format!("{} :: {}", title, category)
+            }
+        })
         .collect();
 
-    // 4. Get diff snippet
+    // 4. Get full debrief and diff snippet
+    let full_debrief_json = debrief.ai_response_json.clone().unwrap_or_default();
     let diff_snippet = debrief.diff_content.chars().take(3000).collect::<String>();
 
     // 5. Process each selected note
@@ -212,9 +230,17 @@ pub async fn write_to_kb(
 
         let suggested = &ai_response.suggested_notes[idx];
 
-        // Check for existing note
-        let existing_content = kb_service::find_existing_note(&kb_path, &suggested.title)
-            .and_then(|path| std::fs::read_to_string(path).ok());
+        // Check for existing note (prefer category+title exact path, fallback to title lookup)
+        let preferred_existing_path = kb_path
+            .join(&suggested.category)
+            .join(format!("{}.md", kb_service::sanitize_filename(&suggested.title)));
+        let existing_content = if preferred_existing_path.exists() {
+            std::fs::read_to_string(&preferred_existing_path).ok()
+        } else {
+            kb_service::find_existing_note(&kb_path, &suggested.title)
+                .and_then(|path| std::fs::read_to_string(path).ok())
+        }
+        .map(|raw| kb_service::strip_yaml_frontmatter(&raw));
 
         let note_input = ai::KbNoteInput {
             title: suggested.title.clone(),
@@ -222,10 +248,12 @@ pub async fn write_to_kb(
             tags: suggested.tags.clone(),
             links_to: suggested.links_to.clone(),
             existing_content,
+            full_debrief_json: full_debrief_json.clone(),
             diff_snippet: diff_snippet.clone(),
             commit_message: debrief.commit_message.clone(),
             project_name: project_name.clone(),
             existing_titles: existing_titles.clone(),
+            existing_notes_catalog: existing_notes_catalog.clone(),
         };
 
         // Generate note with retries
@@ -246,10 +274,34 @@ pub async fn write_to_kb(
         }
 
         if let Some(generated) = kb_note {
-            // Write to disk
+            // Resolve deterministic file path to avoid duplicates across repeated saves
             let dir = kb_service::ensure_kb_dir(&kb_path, &suggested.category)?;
-            let filename = kb_service::sanitize_filename(&generated.title);
-            let file_path = dir.join(format!("{}.md", filename));
+            let preferred_filename = kb_service::sanitize_filename(&suggested.title);
+            let generated_filename = kb_service::sanitize_filename(&generated.title);
+            let preferred_path = dir.join(format!("{}.md", preferred_filename));
+            let generated_path = dir.join(format!("{}.md", generated_filename));
+            let file_path = if preferred_path.exists() {
+                preferred_path.clone()
+            } else if generated_path.exists() {
+                generated_path.clone()
+            } else {
+                preferred_path.clone()
+            };
+            let file_path_str = file_path.to_string_lossy().to_string();
+
+            // Upsert semantics in DB: if this file already has a note row, update it
+            let db = state.db();
+            let existing_note = db
+                .list_knowledge_notes()
+                .map_err(|e| format!("Failed to list notes: {}", e))?
+                .into_iter()
+                .find(|n| n.file_path == file_path_str);
+
+            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            let created_date = existing_note
+                .as_ref()
+                .map(|n| n.created_at.chars().take(10).collect::<String>())
+                .unwrap_or_else(|| today.clone());
 
             let fm = kb_service::NoteFrontmatter {
                 title: generated.title.clone(),
@@ -258,18 +310,27 @@ pub async fn write_to_kb(
                 source_project: project_name.clone(),
                 source_commit: commit_hash.clone(),
                 auto_generated: true,
-                created: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-                updated: None,
+                created: created_date,
+                updated: existing_note.as_ref().map(|_| today.clone()),
             };
 
             let note_body = kb_service::strip_yaml_frontmatter(&generated.content);
             kb_service::write_note_atomic(&file_path, &fm, &note_body)?;
 
-            // Save to DB
-            let file_path_str = file_path.to_string_lossy().to_string();
-            let db = state.db();
-            let note = db
-                .create_knowledge_note(
+            let note = if let Some(existing) = existing_note {
+                db.update_knowledge_note(
+                    existing.id,
+                    &generated.title,
+                    &suggested.category,
+                    &file_path_str,
+                    &suggested.tags,
+                    &suggested.links_to,
+                )
+                .map_err(|e| format!("Failed to update KB note record: {}", e))?;
+                db.get_knowledge_note(existing.id)
+                    .map_err(|e| format!("Failed to get updated KB note record: {}", e))?
+            } else {
+                db.create_knowledge_note(
                     Some(debrief.project_id),
                     &generated.title,
                     &suggested.category,
@@ -280,7 +341,8 @@ pub async fn write_to_kb(
                     Some(&commit_hash),
                     &suggested.links_to,
                 )
-                .map_err(|e| format!("Failed to create KB note record: {}", e))?;
+                .map_err(|e| format!("Failed to create KB note record: {}", e))?
+            };
 
             created_notes.push(note_to_dto(&note));
         }

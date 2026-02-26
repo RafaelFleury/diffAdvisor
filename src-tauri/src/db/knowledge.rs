@@ -5,6 +5,29 @@ use super::models::KnowledgeNote;
 use super::Database;
 
 impl Database {
+    pub fn dedupe_knowledge_notes_by_file_path(&self) -> DbResult<usize> {
+        let conn = self.conn();
+        let rows = conn.execute(
+            "DELETE FROM knowledge_notes
+             WHERE file_path <> ''
+               AND file_path IN (
+                 SELECT file_path
+                 FROM knowledge_notes
+                 WHERE file_path <> ''
+                 GROUP BY file_path
+                 HAVING COUNT(*) > 1
+               )
+               AND id NOT IN (
+                 SELECT MAX(id)
+                 FROM knowledge_notes
+                 WHERE file_path <> ''
+                 GROUP BY file_path
+               )",
+            [],
+        )?;
+        Ok(rows)
+    }
+
     pub fn create_knowledge_note(
         &self,
         project_id: Option<i64>,
@@ -259,5 +282,24 @@ mod tests {
         db.create_knowledge_note(None, "Note 2", "cat2", "/kb/2.md", true, &[], None, None, &[]).unwrap();
         let notes = db.list_knowledge_notes().unwrap();
         assert_eq!(notes.len(), 2);
+    }
+
+    #[test]
+    fn test_dedupe_knowledge_notes_by_file_path() {
+        let db = setup();
+        db.create_knowledge_note(None, "Title A", "cat", "/kb/same.md", false, &[], None, None, &[])
+            .unwrap();
+        db.create_knowledge_note(None, "Title B", "cat", "/kb/same.md", false, &[], None, None, &[])
+            .unwrap();
+        db.create_knowledge_note(None, "Unique", "cat", "/kb/unique.md", false, &[], None, None, &[])
+            .unwrap();
+
+        let removed = db.dedupe_knowledge_notes_by_file_path().unwrap();
+        assert_eq!(removed, 1);
+
+        let notes = db.list_knowledge_notes().unwrap();
+        assert_eq!(notes.len(), 2);
+        let same_count = notes.iter().filter(|n| n.file_path == "/kb/same.md").count();
+        assert_eq!(same_count, 1);
     }
 }

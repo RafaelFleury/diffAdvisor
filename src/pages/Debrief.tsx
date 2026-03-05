@@ -23,6 +23,7 @@ export default function Debrief() {
     clearDebrief,
   } = useDebriefStore()
   const [savingToKb, setSavingToKb] = useState(false)
+  const isAlreadyReviewed = currentDebrief?.status === 'reviewed'
 
   useEffect(() => {
     if (commitHash) {
@@ -32,7 +33,7 @@ export default function Debrief() {
   }, [commitHash, loadDebrief, clearDebrief])
 
   const handleMarkReviewed = async () => {
-    if (currentDebrief) {
+    if (currentDebrief && !isAlreadyReviewed) {
       await markReviewed(currentDebrief.id)
       toast.success('Marked as reviewed')
       navigate('/')
@@ -185,24 +186,26 @@ export default function Debrief() {
           <button
             onClick={handleMarkReviewed}
             className="font-mono"
+            disabled={isAlreadyReviewed}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              backgroundColor: 'var(--text)',
-              color: 'var(--bg)',
+              backgroundColor: isAlreadyReviewed ? 'var(--bg-tertiary)' : 'var(--text)',
+              color: isAlreadyReviewed ? 'var(--text-tertiary)' : 'var(--bg)',
               border: 'none',
               padding: '6px 14px',
               borderRadius: 6,
               fontSize: 12,
               fontWeight: 500,
-              cursor: 'pointer',
+              cursor: isAlreadyReviewed ? 'not-allowed' : 'pointer',
+              opacity: isAlreadyReviewed ? 0.8 : 1,
             }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20,6 9,17 4,12" />
             </svg>
-            Mark Reviewed
+            {isAlreadyReviewed ? 'Reviewed' : 'Mark Reviewed'}
           </button>
         </div>
       </div>

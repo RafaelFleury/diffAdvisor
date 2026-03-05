@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tauri::State;
 
 use crate::db::models::KnowledgeNote;
@@ -29,6 +30,12 @@ fn note_to_dto(note: &KnowledgeNote) -> KnowledgeNoteDto {
         String::new()
     };
 
+    let content = if note.auto_generated {
+        ai::normalize_kb_note_markdown(&note.title, &content)
+    } else {
+        content
+    };
+
     KnowledgeNoteDto {
         id: note.id.to_string(),
         project_id: note.project_id.map(|id| id.to_string()),
@@ -43,15 +50,93 @@ fn note_to_dto(note: &KnowledgeNote) -> KnowledgeNoteDto {
     }
 }
 
-#[tauri::command]
-pub async fn get_notes(state: State<'_, AppState>) -> Result<Vec<KnowledgeNoteDto>, String> {
+fn get_kb_path_str(state: &AppState) -> String {
+    let db = state.db();
+    db.get_setting("knowledge.storagePath")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "~/knowledge_base".to_string())
+}
+
+fn get_kb_root(state: &AppState) -> std::path::PathBuf {
+    kb_service::expand_kb_path(&get_kb_path_str(state))
+}
+
+fn note_is_visible_in_root(note: &KnowledgeNote, kb_root: &Path) -> bool {
+    !note.file_path.is_empty()
+        && Path::new(&note.file_path).exists()
+        && kb_service::is_note_path_in_root(Path::new(&note.file_path), kb_root)
+}
+
+fn sync_kb_index(state: &AppState) -> Result<std::path::PathBuf, String> {
+    let kb_root = get_kb_root(state);
+    let scanned_notes = kb_service::scan_kb_notes(&kb_root);
+
     let db = state.db();
     db.dedupe_knowledge_notes_by_file_path()
         .map_err(|e| format!("Failed to dedupe notes: {}", e))?;
+
+    for scanned in scanned_notes {
+        let file_path = scanned.file_path.to_string_lossy().to_string();
+        let existing = db
+            .get_knowledge_note_by_file_path(&file_path)
+            .map_err(|e| format!("Failed to get note by file path: {}", e))?;
+
+        match existing {
+            Some(note)
+                if note.title != scanned.title
+                    || note.category_path != scanned.category_path
+                    || note.tags != scanned.tags =>
+            {
+                db.update_knowledge_note(
+                    note.id,
+                    &scanned.title,
+                    &scanned.category_path,
+                    &file_path,
+                    &scanned.tags,
+                    &note.links_to,
+                )
+                .map_err(|e| format!("Failed to sync KB note metadata: {}", e))?;
+            }
+            Some(_) => {}
+            None => {
+                db.create_knowledge_note(
+                    None,
+                    &scanned.title,
+                    &scanned.category_path,
+                    &file_path,
+                    scanned.auto_generated,
+                    &scanned.tags,
+                    None,
+                    None,
+                    &[],
+                )
+                .map_err(|e| format!("Failed to index KB note: {}", e))?;
+            }
+        }
+    }
+
+    Ok(kb_root)
+}
+
+fn list_visible_notes(state: &AppState) -> Result<Vec<KnowledgeNote>, String> {
+    let kb_root = sync_kb_index(state)?;
+    let db = state.db();
     let notes = db
         .list_knowledge_notes()
         .map_err(|e| format!("Failed to list notes: {}", e))?;
 
+    Ok(notes
+        .into_iter()
+        .filter(|note| note_is_visible_in_root(note, &kb_root))
+        .collect())
+}
+
+#[tauri::command]
+pub async fn get_notes(state: State<'_, AppState>) -> Result<Vec<KnowledgeNoteDto>, String> {
+    let notes = list_visible_notes(state.inner())?;
     Ok(notes.iter().map(note_to_dto).collect())
 }
 
@@ -60,9 +145,11 @@ pub async fn get_note(
     state: State<'_, AppState>,
     note_id: i64,
 ) -> Result<Option<KnowledgeNoteDto>, String> {
+    let kb_root = sync_kb_index(state.inner())?;
     let db = state.db();
     match db.get_knowledge_note(note_id) {
-        Ok(note) => Ok(Some(note_to_dto(&note))),
+        Ok(note) if note_is_visible_in_root(&note, &kb_root) => Ok(Some(note_to_dto(&note))),
+        Ok(_) => Ok(None),
         Err(crate::db::error::DbError::NotFound) => Ok(None),
         Err(e) => Err(format!("Failed to get note: {}", e)),
     }
@@ -77,15 +164,7 @@ pub async fn save_note(
     tags: Vec<String>,
     note_id: Option<i64>,
 ) -> Result<KnowledgeNoteDto, String> {
-    let kb_path_str = {
-        let db = state.db();
-        db.get_setting("knowledge.storagePath")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "~/knowledge_base".to_string())
-    };
-
-    let kb_path = kb_service::expand_kb_path(&kb_path_str);
+    let kb_path = get_kb_root(state.inner());
     let dir = kb_service::ensure_kb_dir(&kb_path, &category_path)?;
 
     let filename = kb_service::sanitize_filename(&title);
@@ -140,14 +219,17 @@ pub async fn search_notes(
     state: State<'_, AppState>,
     query: String,
 ) -> Result<Vec<KnowledgeNoteDto>, String> {
+    let kb_root = sync_kb_index(state.inner())?;
     let db = state.db();
-    db.dedupe_knowledge_notes_by_file_path()
-        .map_err(|e| format!("Failed to dedupe notes: {}", e))?;
     let notes = db
         .search_knowledge_notes(&query)
         .map_err(|e| format!("Failed to search notes: {}", e))?;
 
-    Ok(notes.iter().map(note_to_dto).collect())
+    Ok(notes
+        .into_iter()
+        .filter(|note| note_is_visible_in_root(note, &kb_root))
+        .map(|note| note_to_dto(&note))
+        .collect())
 }
 
 #[tauri::command]
@@ -177,27 +259,20 @@ pub async fn write_to_kb(
         .ok_or("No AI response found for this debrief")?;
 
     // 2. Get settings
-    let (kb_path_str, ai_config) = {
+    let kb_path = sync_kb_index(state.inner())?;
+    let ai_config = {
         let db = state.db();
-        db.dedupe_knowledge_notes_by_file_path()
-            .map_err(|e| format!("Failed to dedupe notes: {}", e))?;
-        let kb_path = db.get_setting("knowledge.storagePath").ok().flatten().unwrap_or_else(|| "~/knowledge_base".to_string());
         let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
         let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
         let api_key = db.get_setting("ai.apiKey").ok().flatten().unwrap_or_default();
         let output_cap = db.get_setting("ai.requiresOutputCap").ok().flatten();
-        (
-            kb_path,
-            ai::AiConfig {
-                endpoint_url: endpoint,
-                model,
-                api_key,
-                requires_output_cap: output_cap,
-            },
-        )
+        ai::AiConfig {
+            endpoint_url: endpoint,
+            model,
+            api_key,
+            requires_output_cap: output_cap,
+        }
     };
-
-    let kb_path = kb_service::expand_kb_path(&kb_path_str);
 
     // 3. Get existing KB notes catalog
     let existing_kb_notes = kb_service::list_existing_note_titles(&kb_path);
@@ -292,10 +367,8 @@ pub async fn write_to_kb(
             // Upsert semantics in DB: if this file already has a note row, update it
             let db = state.db();
             let existing_note = db
-                .list_knowledge_notes()
-                .map_err(|e| format!("Failed to list notes: {}", e))?
-                .into_iter()
-                .find(|n| n.file_path == file_path_str);
+                .get_knowledge_note_by_file_path(&file_path_str)
+                .map_err(|e| format!("Failed to get note by file path: {}", e))?;
 
             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
             let created_date = existing_note

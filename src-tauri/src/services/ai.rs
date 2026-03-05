@@ -222,6 +222,9 @@ pub async fn generate_kb_note(
 - Check existing notes and merge/update concept coverage instead of duplicating content
 - Keep notes concise and scannable
 - Do NOT include YAML frontmatter (the app adds it)
+- Start the markdown body with exactly one H1 heading using the note title: # <title>
+- Use ## for section headings
+- Use ### for sub-section headings
 
 Respond ONLY with valid JSON: {"title": "<note title>", "content": "<markdown body without frontmatter>"}"#;
 
@@ -262,8 +265,60 @@ Respond ONLY with valid JSON: {"title": "<note title>", "content": "<markdown bo
     );
 
     let result = call_chat_completion(config, system, &user, 0.3, Duration::from_secs(90)).await?;
+    let mut parsed = parse_json_response::<KbNoteResponse>(&result.content)?;
+    parsed.content = normalize_kb_note_markdown(&parsed.title, &parsed.content);
+    Ok(parsed)
+}
 
-    parse_json_response::<KbNoteResponse>(&result.content)
+pub fn normalize_kb_note_markdown(title: &str, content: &str) -> String {
+    let trimmed = content.trim();
+    let mut normalized_lines = Vec::new();
+    let mut in_code_fence = false;
+
+    for line in trimmed.lines() {
+        let trimmed_line = line.trim_start();
+        if trimmed_line.starts_with("```") {
+            in_code_fence = !in_code_fence;
+            normalized_lines.push(line.to_string());
+            continue;
+        }
+
+        if !in_code_fence {
+            if let Some(normalized_heading) = normalize_heading_depth(line) {
+                normalized_lines.push(normalized_heading);
+                continue;
+            }
+        }
+
+        normalized_lines.push(line.to_string());
+    }
+
+    let body = normalized_lines.join("\n").trim().to_string();
+    if body
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.trim_start().starts_with("# "))
+    {
+        body
+    } else if body.is_empty() {
+        format!("# {}", title.trim())
+    } else {
+        format!("# {}\n\n{}", title.trim(), body)
+    }
+}
+
+fn normalize_heading_depth(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let indent = &line[..line.len() - trimmed.len()];
+    let hash_count = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if hash_count < 3 || hash_count > 6 {
+        return None;
+    }
+    let rest = trimmed[hash_count..].trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+    Some(format!("{}## {}", indent, rest))
 }
 
 pub async fn test_connection(config: &AiConfig) -> Result<bool, AiError> {
@@ -514,4 +569,45 @@ fn parse_json_response<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, A
         block_err,
         &raw[..raw.len().min(200)]
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_kb_note_markdown;
+
+    #[test]
+    fn ensures_title_heading_when_missing() {
+        let result = normalize_kb_note_markdown(
+            "Canvas Immediate Mode",
+            "Immediate mode draws pixels directly.\n\n## State Management\n\nTrack the current tool.",
+        );
+
+        assert!(result.starts_with("# Canvas Immediate Mode\n\n"));
+        assert!(result.contains("## State Management"));
+    }
+
+    #[test]
+    fn preserves_existing_h1_and_demotes_deeper_headings() {
+        let result = normalize_kb_note_markdown(
+            "Canvas Immediate Mode",
+            "# Canvas Immediate Mode\n\n### State Management\n\n#### Rendering Performance",
+        );
+
+        assert_eq!(result.matches("# Canvas Immediate Mode").count(), 1);
+        assert!(result.contains("## State Management"));
+        assert!(result.contains("## Rendering Performance"));
+        assert!(!result.contains("### State Management"));
+        assert!(!result.contains("#### Rendering Performance"));
+    }
+
+    #[test]
+    fn keeps_code_fences_unchanged() {
+        let result = normalize_kb_note_markdown(
+            "Canvas Immediate Mode",
+            "### State Management\n\n```md\n### Keep me\n```\n",
+        );
+
+        assert!(result.contains("## State Management"));
+        assert!(result.contains("```md\n### Keep me\n```"));
+    }
 }

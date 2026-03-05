@@ -27,13 +27,11 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const notes = await knowledgeService.getNotes()
-      set({ notes, filteredNotes: notes, loading: false })
-      // Auto-select first note if none selected
-      if (!get().currentNote && notes.length > 0) {
-        // Select JWT Authentication by default (note-1)
-        const defaultNote = notes.find((n) => n.id === 'note-1') ?? notes[0]
-        set({ currentNote: defaultNote })
-      }
+      const currentNote = get().currentNote
+      const nextCurrentNote = currentNote
+        ? notes.find((note) => note.id === currentNote.id) ?? notes[0] ?? null
+        : notes.find((note) => note.id === 'note-1') ?? notes[0] ?? null
+      set({ notes, filteredNotes: notes, currentNote: nextCurrentNote, loading: false })
     } catch (e) {
       set({ error: (e as Error).message, loading: false })
     }

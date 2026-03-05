@@ -65,6 +65,23 @@ impl Database {
         })
     }
 
+    pub fn get_knowledge_note_by_file_path(&self, file_path: &str) -> DbResult<Option<KnowledgeNote>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, title, category_path, file_path, auto_generated, tags, source_debrief_id, source_commit, links_to, created_at, updated_at
+             FROM knowledge_notes
+             WHERE file_path = ?1
+             ORDER BY id DESC
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![file_path])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::row_to_knowledge_note(row)))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn list_knowledge_notes(&self) -> DbResult<Vec<KnowledgeNote>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
@@ -177,6 +194,31 @@ mod tests {
         assert!(note.auto_generated);
         assert!(note.project_id.is_none());
         assert_eq!(note.tags, vec!["security", "authentication", "jwt"]);
+    }
+
+    #[test]
+    fn test_get_knowledge_note_by_file_path() {
+        let db = setup();
+        db.create_knowledge_note(
+            None,
+            "JWT Authentication",
+            "concepts/security",
+            "/kb/concepts/security/JWT Authentication.md",
+            true,
+            &["security".into()],
+            None,
+            None,
+            &[],
+        )
+        .unwrap();
+
+        let note = db
+            .get_knowledge_note_by_file_path("/kb/concepts/security/JWT Authentication.md")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(note.title, "JWT Authentication");
+        assert_eq!(note.category_path, "concepts/security");
     }
 
     #[test]

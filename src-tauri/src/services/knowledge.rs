@@ -53,7 +53,7 @@ pub fn sanitize_filename(title: &str) -> String {
 
     let result = result.trim().to_string();
     if result.len() > 200 {
-        result[..200].to_string()
+        result[..result.floor_char_boundary(200)].trim_end().to_string()
     } else {
         result
     }
@@ -296,6 +296,13 @@ pub fn expand_kb_path(path_str: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_filename_truncates_on_char_boundary() {
+        let title = format!("a{}", "ção ".repeat(80));
+        let result = sanitize_filename(&title);
+        assert!(result.len() <= 200);
+    }
 
     #[test]
     fn test_scan_kb_notes_reads_frontmatter() {

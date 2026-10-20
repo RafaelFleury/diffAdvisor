@@ -61,9 +61,10 @@ function testDebriefService(factory: () => IDebriefService, knownCommitHash: str
   })
 
   it('returns pending commits for a project', async () => {
-    const commits = await service.getPendingCommits('proj-1')
+    const { commits, hasMore } = await service.getPendingCommits('proj-1')
     expect(commits.length).toBeGreaterThan(0)
     expect(commits.every((c) => c.status === 'pending')).toBe(true)
+    expect(typeof hasMore).toBe('boolean')
   })
 
   it('returns reviewed commits for a project', async () => {

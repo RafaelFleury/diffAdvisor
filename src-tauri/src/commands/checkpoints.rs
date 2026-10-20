@@ -114,7 +114,7 @@ pub async fn submit_checkpoint(
 
         let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
         let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
-        let api_key = db.get_setting("ai.apiKey").ok().flatten().unwrap_or_default();
+        let api_key = crate::services::secrets::load_api_key(&db);
         let output_cap = db.get_setting("ai.requiresOutputCap").ok().flatten();
         let ai_config = ai::AiConfig {
             endpoint_url: endpoint,

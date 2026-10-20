@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
   Project,
   Commit,
+  PendingCommitsPage,
   DebriefResult,
   FileDiff,
   CheckpointResponse,
@@ -41,8 +42,8 @@ export class TauriProjectService implements IProjectService {
 }
 
 export class TauriDebriefService implements IDebriefService {
-  getPendingCommits(projectId: string): Promise<Commit[]> {
-    return invoke<Commit[]>('get_pending_commits', { projectId: parseInt(projectId) })
+  getPendingCommits(projectId: string, limit?: number): Promise<PendingCommitsPage> {
+    return invoke<PendingCommitsPage>('get_pending_commits', { projectId: parseInt(projectId), limit })
   }
 
   getReviewedCommits(projectId: string): Promise<Commit[]> {

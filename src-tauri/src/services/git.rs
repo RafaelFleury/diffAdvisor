@@ -27,9 +27,37 @@ pub fn is_git_repo(path: &str) -> bool {
     Path::new(path).join(".git").exists()
 }
 
-pub fn list_recent_commits(repo_path: &str, limit: usize) -> Result<Vec<CommitInfo>, String> {
+const LOG_FORMAT: &str = "--format=%x1e%H%x1f%s%x1f%an%x1f%aI";
+
+/// Lists commits reachable from HEAD, newest first, with diff stats.
+pub fn list_commits(repo_path: &str, skip: usize, limit: usize) -> Result<Vec<CommitInfo>, String> {
+    run_log(
+        repo_path,
+        &[format!("--skip={}", skip), format!("--max-count={}", limit)],
+    )
+}
+
+/// Looks up specific commits by hash. Hashes that no longer exist are skipped.
+pub fn get_commits(repo_path: &str, hashes: &[String]) -> Result<Vec<CommitInfo>, String> {
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut args = vec!["--no-walk".to_string(), "--ignore-missing".to_string()];
+    args.extend(hashes.iter().cloned());
+    run_log(repo_path, &args)
+}
+
+pub fn get_commit(repo_path: &str, hash: &str) -> Result<CommitInfo, String> {
+    get_commits(repo_path, &[hash.to_string()])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("Commit not found: {}", hash))
+}
+
+fn run_log(repo_path: &str, extra_args: &[String]) -> Result<Vec<CommitInfo>, String> {
     let output = Command::new("git")
-        .args(["log", &format!("-{}", limit), "--format=%H|%s|%an|%aI"])
+        .args(["log", LOG_FORMAT, "--shortstat", "--diff-merges=first-parent"])
+        .args(extra_args)
         .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run git log: {}", e))?;
@@ -39,55 +67,32 @@ pub fn list_recent_commits(repo_path: &str, limit: usize) -> Result<Vec<CommitIn
         return Err(format!("git log failed: {}", stderr));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut commits = Vec::new();
-
-    for line in stdout.lines() {
-        let parts: Vec<&str> = line.splitn(4, '|').collect();
-        if parts.len() < 4 {
-            continue;
-        }
-
-        let hash = parts[0].to_string();
-        let (files_changed, additions, deletions) = get_commit_stats(repo_path, &hash);
-
-        commits.push(CommitInfo {
-            hash,
-            message: parts[1].to_string(),
-            author: parts[2].to_string(),
-            timestamp: parts[3].to_string(),
-            files_changed,
-            additions,
-            deletions,
-        });
-    }
-
-    Ok(commits)
+    Ok(parse_log_output(&String::from_utf8_lossy(&output.stdout)))
 }
 
-fn get_commit_stats(repo_path: &str, hash: &str) -> (i32, i32, i32) {
-    // Try normal diff first (works for non-initial commits)
-    let output = Command::new("git")
-        .args(["diff", "--shortstat", &format!("{}^..{}", hash, hash)])
-        .current_dir(repo_path)
-        .output();
-
-    let stat_line = match output {
-        Ok(ref o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => {
-            // Fallback for initial commit
-            let show = Command::new("git")
-                .args(["show", "--stat", "--format=", hash])
-                .current_dir(repo_path)
-                .output();
-            match show {
-                Ok(ref o) => String::from_utf8_lossy(&o.stdout).to_string(),
-                Err(_) => return (0, 0, 0),
+fn parse_log_output(stdout: &str) -> Vec<CommitInfo> {
+    stdout
+        .split('\x1e')
+        .filter_map(|record| {
+            let mut lines = record.lines();
+            let header = lines.next()?;
+            let parts: Vec<&str> = header.splitn(4, '\x1f').collect();
+            if parts.len() < 4 {
+                return None;
             }
-        }
-    };
-
-    parse_shortstat(&stat_line)
+            let stat_line = lines.find(|l| !l.trim().is_empty()).unwrap_or("");
+            let (files_changed, additions, deletions) = parse_shortstat(stat_line);
+            Some(CommitInfo {
+                hash: parts[0].to_string(),
+                message: parts[1].to_string(),
+                author: parts[2].to_string(),
+                timestamp: parts[3].to_string(),
+                files_changed,
+                additions,
+                deletions,
+            })
+        })
+        .collect()
 }
 
 fn parse_shortstat(stat: &str) -> (i32, i32, i32) {
@@ -268,4 +273,61 @@ pub fn parse_diff_to_file_diffs(diff: &str) -> Vec<FileDiff> {
     }
 
     file_diffs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(["-c", "user.name=Tester", "-c", "user.email=tester@example.com"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap()
+            .status;
+        assert!(status.success(), "git {:?} failed", args);
+    }
+
+    fn repo_with_commits(messages: &[&str]) -> tempfile::TempDir {
+        let temp = tempfile::tempdir().unwrap();
+        git(temp.path(), &["init", "-q"]);
+        for (i, message) in messages.iter().enumerate() {
+            std::fs::write(temp.path().join(format!("f{}.txt", i)), "a\nb\n").unwrap();
+            git(temp.path(), &["add", "."]);
+            git(temp.path(), &["commit", "-q", "-m", message]);
+        }
+        temp
+    }
+
+    #[test]
+    fn list_commits_paginates_newest_first_with_stats() {
+        let repo = repo_with_commits(&["first", "second | with pipe", "terceiro ção"]);
+        let path = repo.path().to_str().unwrap();
+
+        let page = list_commits(path, 0, 2).unwrap();
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].message, "terceiro ção");
+        assert_eq!(page[1].message, "second | with pipe");
+        assert_eq!(page[1].author, "Tester");
+        assert_eq!((page[1].files_changed, page[1].additions, page[1].deletions), (1, 2, 0));
+
+        let rest = list_commits(path, 2, 2).unwrap();
+        assert_eq!(rest.len(), 1);
+        assert_eq!(rest[0].message, "first");
+        assert_eq!(rest[0].files_changed, 1);
+    }
+
+    #[test]
+    fn get_commits_skips_missing_hashes() {
+        let repo = repo_with_commits(&["only"]);
+        let path = repo.path().to_str().unwrap();
+        let head = list_commits(path, 0, 1).unwrap().remove(0);
+
+        let found = get_commits(path, &[head.hash.clone(), "f".repeat(40)]).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].hash, head.hash);
+        assert!(get_commit(path, &"f".repeat(40)).is_err());
+    }
 }

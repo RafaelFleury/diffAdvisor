@@ -1,6 +1,7 @@
 import type {
   Project,
   Commit,
+  PendingCommitsPage,
   DebriefResult,
   FileDiff,
   CheckpointResponse,
@@ -865,6 +866,7 @@ const mockSettings: AppSettings = {
     endpointUrl: 'https://api.anthropic.com/v1',
     model: 'Claude Sonnet 4',
     apiKey: 'sk-ant-••••••••••••••••',
+    contextWindow: '128000',
     webSearch: true,
   },
   analysis: {
@@ -884,9 +886,9 @@ const mockSettings: AppSettings = {
 
 // ── Mutable state for session persistence ──
 
-let commits = [...mockCommits]
+const commits = [...mockCommits]
 let notes = [...mockKnowledgeNotes]
-let skills = [...mockSkills]
+const skills = [...mockSkills]
 let settings = { ...mockSettings }
 const checkpointResponses: CheckpointResponse[] = []
 
@@ -932,9 +934,10 @@ export class MockProjectService implements IProjectService {
 }
 
 export class MockDebriefService implements IDebriefService {
-  async getPendingCommits(_projectId: string): Promise<Commit[]> {
+  async getPendingCommits(_projectId: string, limit = 50): Promise<PendingCommitsPage> {
     await delay()
-    return commits.filter((c) => c.status === 'pending')
+    const pending = commits.filter((c) => c.status === 'pending')
+    return { commits: pending.slice(0, limit), hasMore: pending.length > limit }
   }
 
   async getReviewedCommits(_projectId: string): Promise<Commit[]> {

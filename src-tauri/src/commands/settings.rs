@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::services::{ai, skills};
+use crate::services::{ai, secrets, skills};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,7 +31,12 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<serde_json::Valu
     let json_str = db
         .get_app_settings()
         .map_err(|e| format!("Failed to get settings: {}", e))?;
-    serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse settings: {}", e))
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse settings: {}", e))?;
+    if let Some(ai) = settings.get_mut("ai").and_then(|v| v.as_object_mut()) {
+        ai.insert("apiKey".to_string(), serde_json::Value::String(secrets::load_api_key(&db)));
+    }
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -54,6 +59,12 @@ pub async fn update_settings(
                             serde_json::Value::Number(n) => n.to_string(),
                             _ => serde_json::to_string(value).unwrap_or_default(),
                         };
+                        if flat_key == "ai.apiKey" {
+                            if str_value != secrets::load_api_key(&db) {
+                                secrets::store_api_key(&db, &str_value)?;
+                            }
+                            continue;
+                        }
                         db.set_setting(&flat_key, &str_value)
                             .map_err(|e| format!("Failed to set {}: {}", flat_key, e))?;
                     }
@@ -198,7 +209,7 @@ pub async fn test_connection(state: State<'_, AppState>) -> Result<ConnectionRes
         let db = state.db();
         let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
         let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
-        let api_key = db.get_setting("ai.apiKey").ok().flatten().unwrap_or_default();
+        let api_key = crate::services::secrets::load_api_key(&db);
         let output_cap = db.get_setting("ai.requiresOutputCap").ok().flatten();
         ai::AiConfig {
             endpoint_url: endpoint,

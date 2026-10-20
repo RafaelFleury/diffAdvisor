@@ -7,7 +7,7 @@ AI-powered code review and learning tool built with Tauri 2 (Rust + React/TypeSc
 - **Node.js** v18+ (v22 recommended)
 - **pnpm** v8+
 - **Rust** (stable)
-- **System libraries** (Linux): `libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf`
+- **System libraries** (Linux): `libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev libdbus-1-dev patchelf`
 
 ## Setup
 
@@ -75,11 +75,15 @@ Refer to the [Tauri distribution documentation](https://tauri.app/v2/guides/dist
 
 ## Tests
 
-Rust (database layer):
+Rust (database layer and services, without the Tauri runtime):
 
 ```bash
 cd src-tauri
 cargo test --no-default-features
 ```
 
-This runs 41 tests (40 unit + 1 integration) covering all CRUD operations for projects, debriefs, gaps, checkpoints, knowledge notes, and settings.
+Frontend:
+
+```bash
+pnpm test
+```

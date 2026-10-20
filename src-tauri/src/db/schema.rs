@@ -145,6 +145,7 @@ fn seed_default_settings(conn: &Connection) -> DbResult<()> {
         ("ai.endpointUrl", "https://api.openai.com/v1"),
         ("ai.model", "gpt-4.1"),
         ("ai.apiKey", ""),
+        ("ai.contextWindow", "128000"),
         ("ai.webSearch", "false"),
         ("analysis.autoAnalyze", "false"),
         ("analysis.checkpointMode", "free_text"),

@@ -19,6 +19,12 @@ pub fn estimate_tokens(text: &str, is_code: bool) -> usize {
     }
 }
 
+/// Input token budget for a model with the given context window, leaving room for the response.
+pub fn input_token_budget(context_window: usize) -> usize {
+    let context_window = context_window.max(4_000);
+    context_window - (context_window / 4).min(16_000)
+}
+
 pub fn build_project_structure(repo_path: &str, ignored_paths: &[&str]) -> String {
     let mut result = String::new();
     let root = Path::new(repo_path);
@@ -172,8 +178,8 @@ pub fn assemble_user_message(
     history: &[String],
     diff: &str,
     system_tokens_used: usize,
+    total_budget: usize,
 ) -> (String, Vec<String>) {
-    let total_budget: usize = 100_000;
     let remaining = total_budget.saturating_sub(system_tokens_used);
     let mut reduction_log = Vec::new();
 
@@ -217,7 +223,7 @@ pub fn assemble_user_message(
         parts.push(diff_section);
     } else {
         // Overflow cascade
-        let budget = remaining - commit_tokens; // commit info always included
+        let budget = remaining.saturating_sub(commit_tokens); // commit info always included
         parts.push(commit_section);
 
         // 1. Try to fit everything

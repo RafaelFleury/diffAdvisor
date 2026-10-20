@@ -1,5 +1,5 @@
 export type { Project } from './project.ts'
-export type { Commit, CommitStatus } from './commit.ts'
+export type { Commit, CommitStatus, PendingCommitsPage } from './commit.ts'
 export type {
   Severity,
   GapCategory,

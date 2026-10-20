@@ -5,11 +5,21 @@ import { useProjectStore } from '@/stores/projectStore.ts'
 import { IS_MOCK_SERVICES } from '@/services/index.ts'
 import StatCard from '@/components/ui/StatCard.tsx'
 import CommitCard from '@/components/ui/CommitCard.tsx'
+import Button from '@/components/ui/Button.tsx'
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { pendingCommits, reviewedCommits, gapCount, loading, loadCommits, loadGapCount } =
-    useDebriefStore()
+  const {
+    pendingCommits,
+    reviewedCommits,
+    gapCount,
+    loading,
+    hasMoreCommits,
+    loadingMoreCommits,
+    loadCommits,
+    loadMoreCommits,
+    loadGapCount,
+  } = useDebriefStore()
   const { activeProject, loadActiveProject } = useProjectStore()
 
   useEffect(() => {
@@ -120,6 +130,18 @@ export default function Dashboard() {
                   }}
                 />
               ))
+            )}
+            {hasMoreCommits && activeProject && (
+              <div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={loadingMoreCommits}
+                  onClick={() => void loadMoreCommits(activeProject.id)}
+                >
+                  Load older commits
+                </Button>
+              </div>
             )}
           </div>
 

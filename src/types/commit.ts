@@ -10,3 +10,8 @@ export interface Commit {
   deletions: number
   status: CommitStatus
 }
+
+export interface PendingCommitsPage {
+  commits: Commit[]
+  hasMore: boolean
+}

@@ -47,6 +47,15 @@ pub struct CheckpointQuestionDto {
     pub correct_option_index: Option<u32>,
 }
 
+const DEFAULT_COMMIT_PAGE_SIZE: usize = 50;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingCommitsDto {
+    pub commits: Vec<CommitDto>,
+    pub has_more: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitDto {
@@ -140,27 +149,37 @@ fn debrief_to_dto(debrief: &Debrief, gaps: &[Gap]) -> DebriefDto {
 pub async fn get_pending_commits(
     state: State<'_, AppState>,
     project_id: i64,
-) -> Result<Vec<CommitDto>, String> {
-    let db = state.db();
-    let project = db
-        .get_project(project_id)
-        .map_err(|e| format!("Project not found: {}", e))?;
+    limit: Option<usize>,
+) -> Result<PendingCommitsDto, String> {
+    let limit = limit.unwrap_or(DEFAULT_COMMIT_PAGE_SIZE);
+    let (project_path, reviewed_hashes) = {
+        let db = state.db();
+        let project = db
+            .get_project(project_id)
+            .map_err(|e| format!("Project not found: {}", e))?;
+        let reviewed_hashes: Vec<String> = db
+            .list_debriefs_by_status(project_id, "reviewed")
+            .map_err(|e| format!("Failed to list debriefs: {}", e))?
+            .into_iter()
+            .map(|d| d.commit_hash)
+            .collect();
+        (project.path, reviewed_hashes)
+    };
 
-    let all_commits = git::list_recent_commits(&project.path, 50)?;
+    let mut commits = git::list_commits(&project_path, 0, limit + 1)?;
+    let has_more = commits.len() > limit;
+    commits.truncate(limit);
 
-    // Get reviewed debrief commit hashes
-    let reviewed_debriefs = db
-        .list_debriefs_by_status(project_id, "reviewed")
-        .map_err(|e| format!("Failed to list debriefs: {}", e))?;
-    let reviewed_hashes: Vec<String> = reviewed_debriefs.iter().map(|d| d.commit_hash.clone()).collect();
-
-    let pending: Vec<CommitDto> = all_commits
+    let pending = commits
         .iter()
         .filter(|c| !reviewed_hashes.contains(&c.hash))
         .map(|c| commit_info_to_dto(c, "pending"))
         .collect();
 
-    Ok(pending)
+    Ok(PendingCommitsDto {
+        commits: pending,
+        has_more,
+    })
 }
 
 #[tauri::command]
@@ -168,22 +187,25 @@ pub async fn get_reviewed_commits(
     state: State<'_, AppState>,
     project_id: i64,
 ) -> Result<Vec<CommitDto>, String> {
-    let db = state.db();
-    let project = db
-        .get_project(project_id)
-        .map_err(|e| format!("Project not found: {}", e))?;
+    let (project_path, reviewed_debriefs) = {
+        let db = state.db();
+        let project = db
+            .get_project(project_id)
+            .map_err(|e| format!("Project not found: {}", e))?;
+        let reviewed_debriefs = db
+            .list_debriefs_by_status(project_id, "reviewed")
+            .map_err(|e| format!("Failed to list debriefs: {}", e))?;
+        (project.path, reviewed_debriefs)
+    };
 
-    let reviewed_debriefs = db
-        .list_debriefs_by_status(project_id, "reviewed")
-        .map_err(|e| format!("Failed to list debriefs: {}", e))?;
+    let hashes: Vec<String> = reviewed_debriefs.iter().map(|d| d.commit_hash.clone()).collect();
+    let known = git::get_commits(&project_path, &hashes).unwrap_or_default();
 
-    let mut commits = Vec::new();
-    for debrief in reviewed_debriefs {
-        let recent = git::list_recent_commits(&project.path, 100).unwrap_or_default();
-        if let Some(ci) = recent.iter().find(|c| c.hash == debrief.commit_hash) {
-            commits.push(commit_info_to_dto(ci, "reviewed"));
-        } else {
-            commits.push(CommitDto {
+    let commits = reviewed_debriefs
+        .into_iter()
+        .map(|debrief| match known.iter().find(|c| c.hash == debrief.commit_hash) {
+            Some(ci) => commit_info_to_dto(ci, "reviewed"),
+            None => CommitDto {
                 hash: debrief.commit_hash,
                 message: debrief.commit_message,
                 author: String::new(),
@@ -192,9 +214,9 @@ pub async fn get_reviewed_commits(
                 additions: 0,
                 deletions: 0,
                 status: "reviewed".to_string(),
-            });
-        }
-    }
+            },
+        })
+        .collect();
 
     Ok(commits)
 }
@@ -266,15 +288,21 @@ pub async fn run_debrief(
     );
 
     // 3. Get settings
-    let (ai_config, analysis_depth, checkpoint_mode, ignored_paths_str) = {
+    let (ai_config, analysis_depth, checkpoint_mode, ignored_paths_str, context_window) = {
         let db = state.db();
         let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
         let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
-        let api_key = db.get_setting("ai.apiKey").ok().flatten().unwrap_or_default();
+        let api_key = crate::services::secrets::load_api_key(&db);
         let output_cap = db.get_setting("ai.requiresOutputCap").ok().flatten();
         let depth = db.get_setting("analysis.analysisDepth").ok().flatten().unwrap_or_else(|| "balanced".to_string());
         let mode = db.get_setting("analysis.checkpointMode").ok().flatten().unwrap_or_else(|| "free_text".to_string());
         let ignored = db.get_setting("project.ignoredPaths").ok().flatten().unwrap_or_default();
+        let context_window = db
+            .get_setting("ai.contextWindow")
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(128_000);
 
         (
             ai::AiConfig {
@@ -286,6 +314,7 @@ pub async fn run_debrief(
             depth,
             mode,
             ignored,
+            context_window,
         )
     };
     eprintln!(
@@ -303,10 +332,7 @@ pub async fn run_debrief(
     // 4. Get commit diff
     let diff_step_start = Instant::now();
     let diff = git::get_commit_diff(&project_path, &commit_hash)?;
-    let commit_info = git::list_recent_commits(&project_path, 50)?
-        .into_iter()
-        .find(|c| c.hash == commit_hash)
-        .ok_or("Commit not found in git log")?;
+    let commit_info = git::get_commit(&project_path, &commit_hash)?;
 
     let file_diffs = git::parse_diff_to_file_diffs(&diff);
     let changed_files: Vec<String> = file_diffs.iter().map(|f| f.file_name.clone()).collect();
@@ -380,13 +406,14 @@ pub async fn run_debrief(
             .unwrap_or_else(|| default_system_prompt().to_string())
     };
 
+    let input_budget = context::input_token_budget(context_window);
     let (system_message, skills_used) = context::assemble_system_message(
         &base_prompt,
         &analysis_depth,
         &checkpoint_mode,
         &manual_skills,
         &auto_skills,
-        100_000,
+        input_budget / 2,
     );
 
     let system_tokens = context::estimate_tokens(&system_message, false);
@@ -396,6 +423,7 @@ pub async fn run_debrief(
         &history,
         &diff,
         system_tokens,
+        input_budget,
     );
     eprintln!(
         "[debrief] prompt context assembled system_tokens={} user_chars={} history_items={} reductions={}",

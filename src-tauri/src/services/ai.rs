@@ -408,7 +408,7 @@ async fn call_chat_completion(
 
     if !status.is_success() {
         let error_body = response.text().await.unwrap_or_default();
-        let error_preview = &error_body[..error_body.len().min(240)];
+        let error_preview = &error_body[..error_body.floor_char_boundary(240)];
         eprintln!(
             "[ai] chat completion non-success status={} error_preview={}",
             status, error_preview
@@ -567,7 +567,7 @@ fn parse_json_response<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, A
         direct_err,
         cleaned_err,
         block_err,
-        &raw[..raw.len().min(200)]
+        &raw[..raw.floor_char_boundary(200)]
     )))
 }
 

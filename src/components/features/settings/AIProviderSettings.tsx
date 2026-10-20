@@ -91,6 +91,18 @@ export default function AIProviderSettings({ settings, connectionTestResult, onU
         />
       </div>
       <div style={rowStyle}>
+        <span style={labelStyle}>Context Window</span>
+        <input
+          style={inputStyle}
+          type="number"
+          min={4000}
+          step={1000}
+          value={settings.ai.contextWindow}
+          onChange={(e) => onUpdate({ ai: { ...settings.ai, contextWindow: e.target.value } })}
+          placeholder="128000"
+        />
+      </div>
+      <div style={rowStyle}>
         <span style={labelStyle}>API Key</span>
         <div style={{ flex: 1, display: 'flex', gap: 8 }}>
           <input style={inputStyle} type="password" value={settings.ai.apiKey} onChange={(e) => onUpdate({ ai: { ...settings.ai, apiKey: e.target.value } })} />

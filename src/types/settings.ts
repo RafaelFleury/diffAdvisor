@@ -13,6 +13,7 @@ export interface AISettings {
   endpointUrl: string
   model: string
   apiKey: string
+  contextWindow: string
   webSearch: boolean
 }
 

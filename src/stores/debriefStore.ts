@@ -61,8 +61,13 @@ const parseDebriefFailureMessage = (message: string): { cleanMessage: string; ra
   }
 }
 
+const COMMIT_PAGE_SIZE = 50
+
 interface DebriefState {
   pendingCommits: Commit[]
+  hasMoreCommits: boolean
+  commitLimit: number
+  loadingMoreCommits: boolean
   reviewedCommits: Commit[]
   currentDebrief: DebriefResult | null
   diffFiles: FileDiff[]
@@ -72,7 +77,8 @@ interface DebriefState {
   error: string | null
   rawDebriefText: string | null
   answers: Record<string, { text: string; evaluation: Evaluation | null }>
-  loadCommits: (projectId: string) => Promise<void>
+  loadCommits: (projectId: string, limit?: number) => Promise<void>
+  loadMoreCommits: (projectId: string) => Promise<void>
   loadDebrief: (commitHash: string) => Promise<void>
   loadGapCount: (projectId: string) => Promise<void>
   markReviewed: (debriefId: string) => Promise<void>
@@ -82,6 +88,9 @@ interface DebriefState {
 
 export const useDebriefStore = create<DebriefState>((set, get) => ({
   pendingCommits: [],
+  hasMoreCommits: false,
+  commitLimit: COMMIT_PAGE_SIZE,
+  loadingMoreCommits: false,
   reviewedCommits: [],
   currentDebrief: null,
   diffFiles: [],
@@ -92,16 +101,39 @@ export const useDebriefStore = create<DebriefState>((set, get) => ({
   rawDebriefText: null,
   answers: {},
 
-  loadCommits: async (projectId) => {
+  loadCommits: async (projectId, limit = get().commitLimit) => {
     set({ loading: true, error: null })
     try {
       const [pending, reviewed] = await Promise.all([
-        debriefService.getPendingCommits(projectId),
+        debriefService.getPendingCommits(projectId, limit),
         debriefService.getReviewedCommits(projectId),
       ])
-      set({ pendingCommits: pending, reviewedCommits: reviewed, loading: false })
+      set({
+        pendingCommits: pending.commits,
+        hasMoreCommits: pending.hasMore,
+        commitLimit: limit,
+        reviewedCommits: reviewed,
+        loading: false,
+      })
     } catch (e) {
       set({ error: (e as Error).message, loading: false })
+    }
+  },
+
+  loadMoreCommits: async (projectId) => {
+    if (get().loadingMoreCommits) return
+    const limit = get().commitLimit + COMMIT_PAGE_SIZE
+    set({ loadingMoreCommits: true, error: null })
+    try {
+      const pending = await debriefService.getPendingCommits(projectId, limit)
+      set({
+        pendingCommits: pending.commits,
+        hasMoreCommits: pending.hasMore,
+        commitLimit: limit,
+        loadingMoreCommits: false,
+      })
+    } catch (e) {
+      set({ error: (e as Error).message, loadingMoreCommits: false })
     }
   },
 

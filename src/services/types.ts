@@ -1,6 +1,7 @@
 import type {
   Project,
   Commit,
+  PendingCommitsPage,
   DebriefResult,
   FileDiff,
   CheckpointResponse,
@@ -19,7 +20,7 @@ export interface IProjectService {
 }
 
 export interface IDebriefService {
-  getPendingCommits(projectId: string): Promise<Commit[]>
+  getPendingCommits(projectId: string, limit?: number): Promise<PendingCommitsPage>
   getReviewedCommits(projectId: string): Promise<Commit[]>
   getDebriefByCommit(commitHash: string): Promise<DebriefResult | null>
   runDebrief(commitHash: string): Promise<DebriefResult>

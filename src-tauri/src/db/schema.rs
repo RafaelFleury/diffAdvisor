@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use super::error::{DbError, DbResult};
 
-const CURRENT_VERSION: i32 = 2;
+const CURRENT_VERSION: i32 = 3;
 
 pub fn run_migrations(conn: &Connection) -> DbResult<()> {
     conn.execute_batch(
@@ -25,6 +25,10 @@ pub fn run_migrations(conn: &Connection) -> DbResult<()> {
 
     if version < 2 {
         migration_002(conn)?;
+    }
+
+    if version < 3 {
+        migration_003(conn)?;
     }
 
     // Idempotent: adds defaults for settings introduced after the database was created.
@@ -131,6 +135,21 @@ fn migration_002(conn: &Connection) -> DbResult<()> {
         ALTER TABLE knowledge_notes ADD COLUMN source_debrief_id INTEGER REFERENCES debriefs(id) ON DELETE SET NULL;
         ALTER TABLE knowledge_notes ADD COLUMN source_commit TEXT;
         ALTER TABLE knowledge_notes ADD COLUMN links_to TEXT NOT NULL DEFAULT '[]';
+        ",
+    )
+    .map_err(|e| DbError::MigrationError(e.to_string()))?;
+    Ok(())
+}
+
+/// Full-text index over note files, refreshed when a file's mtime changes.
+fn migration_003(conn: &Connection) -> DbResult<()> {
+    conn.execute_batch(
+        "
+        ALTER TABLE knowledge_notes ADD COLUMN file_mtime INTEGER NOT NULL DEFAULT 0;
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_notes_fts USING fts5(
+            title, tags, category_path, content,
+            tokenize = 'unicode61 remove_diacritics 2'
+        );
         ",
     )
     .map_err(|e| DbError::MigrationError(e.to_string()))?;

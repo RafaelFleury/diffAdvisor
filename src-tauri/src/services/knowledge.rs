@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 use serde::Deserialize;
 
 pub struct NoteFrontmatter {
@@ -28,6 +30,8 @@ pub struct IndexedNote {
     pub file_path: PathBuf,
     pub tags: Vec<String>,
     pub auto_generated: bool,
+    /// Note body without frontmatter.
+    pub content: String,
 }
 
 pub fn sanitize_filename(title: &str) -> String {
@@ -136,10 +140,19 @@ pub fn list_existing_note_titles(kb_path: &Path) -> Vec<(String, String)> {
 }
 
 pub fn scan_kb_notes(kb_path: &Path) -> Vec<IndexedNote> {
-    let mut notes = Vec::new();
-    walk_kb_note_files(kb_path, kb_path, &mut notes);
-    notes.sort_by(|a, b| a.file_path.cmp(&b.file_path));
-    notes
+    list_note_files(kb_path)
+        .into_iter()
+        .map(|(path, _)| index_note_file(kb_path, &path))
+        .collect()
+}
+
+/// All `.md` files under the KB with their modification time (seconds),
+/// without reading them, so unchanged files can skip re-indexing.
+pub fn list_note_files(kb_path: &Path) -> Vec<(PathBuf, i64)> {
+    let mut files = Vec::new();
+    walk_kb_note_files(kb_path, &mut files);
+    files.sort();
+    files
 }
 
 fn walk_kb_dir(base: &Path, dir: &Path, titles: &mut Vec<(String, String)>) {
@@ -168,7 +181,7 @@ fn walk_kb_dir(base: &Path, dir: &Path, titles: &mut Vec<(String, String)>) {
     }
 }
 
-fn walk_kb_note_files(base: &Path, dir: &Path, notes: &mut Vec<IndexedNote>) {
+fn walk_kb_note_files(dir: &Path, files: &mut Vec<(PathBuf, i64)>) {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -177,9 +190,16 @@ fn walk_kb_note_files(base: &Path, dir: &Path, notes: &mut Vec<IndexedNote>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            walk_kb_note_files(base, &path, notes);
+            walk_kb_note_files(&path, files);
         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            notes.push(index_note_file(base, &path));
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            files.push((path, modified));
         }
     }
 }
@@ -193,7 +213,7 @@ pub fn is_note_path_in_root(path: &Path, kb_root: &Path) -> bool {
     normalize_path(path).starts_with(normalize_path(kb_root))
 }
 
-fn index_note_file(base: &Path, path: &Path) -> IndexedNote {
+pub fn index_note_file(base: &Path, path: &Path) -> IndexedNote {
     let raw = fs::read_to_string(path).unwrap_or_default();
     let frontmatter = parse_frontmatter(&raw).unwrap_or_default();
     let title = frontmatter
@@ -221,6 +241,7 @@ fn index_note_file(base: &Path, path: &Path) -> IndexedNote {
         file_path: path.to_path_buf(),
         tags: frontmatter.tags.unwrap_or_default(),
         auto_generated: frontmatter.auto_generated.unwrap_or(false),
+        content: strip_yaml_frontmatter(&raw),
     }
 }
 
@@ -278,6 +299,128 @@ fn find_note_recursive(dir: &Path, sanitized_title: &str) -> Option<PathBuf> {
     None
 }
 
+const STOPWORDS: &[&str] = &[
+    "this", "that", "with", "from", "have", "will", "your", "into", "than", "then", "them", "when",
+    "what", "which", "there", "their", "about", "would", "should", "could", "these", "those",
+    "const", "function", "return", "require", "import", "export", "default", "async", "await",
+    "true", "false", "null", "undefined", "none", "self", "string", "number", "boolean", "void",
+    "class", "public", "private", "static", "struct", "impl", "let", "mut", "else", "while",
+    "module", "exports", "type", "interface", "value", "data", "result", "error", "index", "file",
+    "diff", "git", "new", "mode", "dev", "main", "test", "tests",
+];
+
+/// Most frequent meaningful words in `text` (identifiers are split on
+/// camelCase and snake_case), for building a knowledge base search.
+pub fn extract_search_terms(text: &str, max_terms: usize) -> Vec<String> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+
+    for token in text.split(|c: char| !c.is_alphanumeric()) {
+        let mut word = String::new();
+        let mut prev_lower = false;
+        let mut words = Vec::new();
+        for ch in token.chars() {
+            if ch.is_uppercase() && prev_lower {
+                words.push(std::mem::take(&mut word));
+            }
+            prev_lower = ch.is_lowercase();
+            word.extend(ch.to_lowercase());
+        }
+        words.push(word);
+
+        for word in words {
+            if word.chars().count() < 4
+                || word.chars().all(|c| c.is_ascii_digit())
+                || STOPWORDS.contains(&word.as_str())
+            {
+                continue;
+            }
+            let count = counts.entry(word.clone()).or_insert(0);
+            if *count == 0 {
+                order.push(word);
+            }
+            *count += 1;
+        }
+    }
+
+    // Stable: ties keep first-seen order.
+    order.sort_by(|a, b| counts[b].cmp(&counts[a]));
+    order.truncate(max_terms);
+    order
+}
+
+fn quote_fts_term(term: &str) -> String {
+    format!("\"{}\"", term.replace('"', ""))
+}
+
+/// FTS5 query matching notes that contain any of `terms`.
+pub fn fts_any_terms_query(terms: &[String]) -> Option<String> {
+    let quoted: Vec<String> = terms
+        .iter()
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| quote_fts_term(t))
+        .collect();
+    (!quoted.is_empty()).then(|| quoted.join(" OR "))
+}
+
+/// FTS5 query for what a user typed: every word must match, as a prefix,
+/// so results narrow while typing.
+pub fn fts_user_query(input: &str) -> Option<String> {
+    let words: Vec<String> = input
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| format!("{}*", quote_fts_term(w)))
+        .collect();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+pub struct RelatedNote {
+    pub title: String,
+    pub category_path: String,
+    pub file_path: String,
+    pub excerpt: String,
+}
+
+/// Prompt section listing notes found by keyword search, so the model starts
+/// from the developer's existing knowledge instead of searching blindly.
+pub fn format_related_notes(notes: &[RelatedNote]) -> String {
+    if notes.is_empty() {
+        return String::new();
+    }
+    let blocks: Vec<String> = notes
+        .iter()
+        .map(|note| {
+            format!(
+                "### {} ({})\nFile: `{}`\n{}\n",
+                note.title,
+                if note.category_path.is_empty() { "uncategorized" } else { &note.category_path },
+                note.file_path,
+                note.excerpt
+            )
+        })
+        .collect();
+    format!(
+        "## Possibly Related Notes\n\
+These notes from the developer's knowledge base matched keywords of this task (excerpts; read the full file if you need more). \
+Link them by exact title where relevant and don't repeat what they already explain.\n\n{}",
+        blocks.join("\n")
+    )
+}
+
+/// First `max_chars` characters of a note body, cut at a line break when possible.
+pub fn note_excerpt(content: &str, max_chars: usize) -> String {
+    let content = content.trim();
+    if content.chars().count() <= max_chars {
+        return content.to_string();
+    }
+    let cut: String = content.chars().take(max_chars).collect();
+    let cut = match cut.rfind('\n') {
+        Some(pos) if pos > max_chars / 2 => cut[..pos].to_string(),
+        _ => cut,
+    };
+    format!("{}\n[...]", cut.trim_end())
+}
+
 pub fn build_frontmatter_yaml(fm: &NoteFrontmatter) -> String {
     let tags_str = if fm.tags.is_empty() {
         "[]".to_string()
@@ -310,6 +453,34 @@ pub fn expand_kb_path(path_str: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_search_terms_splits_identifiers_and_drops_noise() {
+        let terms = extract_search_terms(
+            "+const rateLimiter = require('./middleware')\n+router.post('/signup', rateLimiter, hashPassword)\nadd signup route",
+            5,
+        );
+        assert_eq!(terms[..2], ["rate".to_string(), "limiter".to_string()]);
+        assert!(terms.contains(&"signup".to_string()));
+        assert!(!terms.iter().any(|t| t == "const" || t == "require"));
+    }
+
+    #[test]
+    fn test_fts_queries_quote_terms() {
+        assert_eq!(
+            fts_any_terms_query(&["rate".into(), "lim\"iter".into()]).as_deref(),
+            Some("\"rate\" OR \"limiter\"")
+        );
+        assert_eq!(fts_user_query("rate lim").as_deref(), Some("\"rate\"* \"lim\"*"));
+        assert_eq!(fts_user_query("  ").as_deref(), None);
+    }
+
+    #[test]
+    fn test_note_excerpt_cuts_long_notes() {
+        let excerpt = note_excerpt(&format!("{}\nsecond line", "a".repeat(30)), 35);
+        assert_eq!(excerpt, format!("{}\n[...]", "a".repeat(30)));
+        assert_eq!(note_excerpt("short", 35), "short");
+    }
 
     #[test]
     fn test_sanitize_category_stays_inside_root() {

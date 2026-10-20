@@ -138,11 +138,75 @@ impl Database {
 
     pub fn delete_knowledge_note(&self, id: i64) -> DbResult<()> {
         let conn = self.conn();
+        conn.execute("DELETE FROM knowledge_notes_fts WHERE rowid = ?1", params![id])?;
         let rows = conn.execute("DELETE FROM knowledge_notes WHERE id = ?1", params![id])?;
         if rows == 0 {
             return Err(DbError::NotFound);
         }
         Ok(())
+    }
+
+    /// mtime of the note file when its content was last indexed (0 = never).
+    pub fn get_note_file_mtime(&self, id: i64) -> DbResult<i64> {
+        let conn = self.conn();
+        Ok(conn.query_row(
+            "SELECT file_mtime FROM knowledge_notes WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn index_note_content(
+        &self,
+        id: i64,
+        title: &str,
+        tags: &[String],
+        category_path: &str,
+        content: &str,
+        file_mtime: i64,
+    ) -> DbResult<()> {
+        let conn = self.conn();
+        conn.execute("DELETE FROM knowledge_notes_fts WHERE rowid = ?1", params![id])?;
+        conn.execute(
+            "INSERT INTO knowledge_notes_fts (rowid, title, tags, category_path, content) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, title, tags.join(" "), category_path, content],
+        )?;
+        conn.execute(
+            "UPDATE knowledge_notes SET file_mtime = ?1 WHERE id = ?2",
+            params![file_mtime, id],
+        )?;
+        Ok(())
+    }
+
+    /// Drops index rows whose note no longer exists.
+    pub fn prune_note_index(&self) -> DbResult<usize> {
+        let conn = self.conn();
+        Ok(conn.execute(
+            "DELETE FROM knowledge_notes_fts WHERE rowid NOT IN (SELECT id FROM knowledge_notes)",
+            [],
+        )?)
+    }
+
+    /// Full-text search, best matches first. `match_query` uses FTS5 syntax.
+    /// Returns each note with its indexed body text.
+    pub fn search_note_index(&self, match_query: &str, limit: usize) -> DbResult<Vec<(KnowledgeNote, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT kn.id, kn.project_id, kn.title, kn.category_path, kn.file_path, kn.auto_generated, kn.tags, kn.source_debrief_id, kn.source_commit, kn.links_to, kn.created_at, kn.updated_at, f.content
+             FROM knowledge_notes_fts f
+             JOIN knowledge_notes kn ON kn.id = f.rowid
+             WHERE knowledge_notes_fts MATCH ?1
+             ORDER BY bm25(knowledge_notes_fts, 5.0, 3.0, 2.0, 1.0)
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![match_query, limit as i64], |row| {
+            Ok((Self::row_to_knowledge_note(row), row.get::<_, String>(12)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
     }
 
     fn row_to_knowledge_note(row: &rusqlite::Row) -> KnowledgeNote {
@@ -171,6 +235,42 @@ mod tests {
 
     fn setup() -> Database {
         Database::open_in_memory().unwrap()
+    }
+
+    fn indexed_note(db: &Database, title: &str, content: &str) -> KnowledgeNote {
+        let note = db
+            .create_knowledge_note(None, title, "security", &format!("/kb/{}.md", title), false, &[], None, None, &[])
+            .unwrap();
+        db.index_note_content(note.id, title, &["security".into()], "security", content, 42)
+            .unwrap();
+        note
+    }
+
+    #[test]
+    fn test_search_note_index_ranks_title_matches_first() {
+        let db = setup();
+        indexed_note(&db, "Password Hashing", "Use bcrypt with a cost of 12.");
+        indexed_note(&db, "Rate Limiting", "The in-memory store resets on restart; use Redis. Mentions bcrypt once.");
+
+        let results = db.search_note_index("\"bcrypt\"", 10).unwrap();
+        let titles: Vec<&str> = results.iter().map(|(n, _)| n.title.as_str()).collect();
+        assert_eq!(titles, ["Password Hashing", "Rate Limiting"]);
+        assert!(results[0].1.contains("cost of 12"));
+
+        let redis = db.search_note_index("\"redis\"", 10).unwrap();
+        assert_eq!(redis.len(), 1);
+        assert_eq!(db.get_note_file_mtime(redis[0].0.id).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_search_note_index_ignores_accents_and_deleted_notes() {
+        let db = setup();
+        let note = indexed_note(&db, "Validação de Entrada", "Sempre valide no servidor.");
+        assert_eq!(db.search_note_index("\"validacao\"", 10).unwrap().len(), 1);
+
+        db.delete_knowledge_note(note.id).unwrap();
+        assert!(db.search_note_index("\"validacao\"", 10).unwrap().is_empty());
+        assert_eq!(db.prune_note_index().unwrap(), 0);
     }
 
     #[test]

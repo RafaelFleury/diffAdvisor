@@ -490,6 +490,33 @@ pub async fn run_debrief(
         llm_config.describe(),
         commit_hash
     );
+    // Seed the prompt with notes the developer already has on these topics,
+    // found by plain keyword search over the knowledge base index.
+    let added_lines: String = diff
+        .lines()
+        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let search_text = format!(
+        "{msg}\n{msg}\n{files}\n{added}",
+        msg = commit_info.message,
+        files = changed_files.join(" "),
+        added = added_lines
+    );
+    let related = super::knowledge::find_related_notes(
+        &state,
+        &crate::services::knowledge::extract_search_terms(&search_text, 25),
+        None,
+        5,
+    );
+    let user_message = if related.is_empty() {
+        user_message
+    } else {
+        // Before the task text, so the closing "reply with JSON" instruction stays last.
+        format!("{}\n{}", crate::services::knowledge::format_related_notes(&related), user_message)
+    };
+    eprintln!("[debrief] related KB notes found={}", related.len());
+
     let debrief_outcome = ai::run_debrief(&llm_config, &system_message, &user_message).await;
     let _ = std::fs::remove_file(&diff_file);
     let debrief_result = match debrief_outcome {

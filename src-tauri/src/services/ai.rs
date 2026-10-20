@@ -133,6 +133,8 @@ pub struct KbNoteInput {
     pub project_name: String,
     pub existing_titles: Vec<String>,
     pub existing_notes_catalog: Vec<String>,
+    /// Prompt section with related notes found by keyword search (may be empty).
+    pub related_notes: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,7 +288,7 @@ Do not try to create or modify files: return the note as JSON and the app will s
     };
 
     let user = format!(
-        "Generate a knowledge base note.\n\nTitle: {}\nCategory: {}\nTags: {}\nLinks to: {}\nProject: {}\nCommit: {}\n\nFull debrief JSON:\n```json\n{}\n```\n\nRelevant diff snippet:\n```\n{}\n```{}{}{}",
+        "Generate a knowledge base note.\n\nTitle: {}\nCategory: {}\nTags: {}\nLinks to: {}\nProject: {}\nCommit: {}\n\nFull debrief JSON:\n```json\n{}\n```\n\nRelevant diff snippet:\n```\n{}\n```{}{}{}{}",
         note_input.title,
         note_input.category,
         note_input.tags.join(", "),
@@ -298,6 +300,11 @@ Do not try to create or modify files: return the note as JSON and the app will s
         existing_titles_str,
         existing_catalog_str,
         existing_content_str,
+        if note_input.related_notes.is_empty() {
+            String::new()
+        } else {
+            format!("\n\n{}", note_input.related_notes)
+        },
     );
 
     let result = call_chat_completion(config, &system, &user, 0.3, Duration::from_secs(90)).await?;

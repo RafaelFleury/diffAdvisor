@@ -78,37 +78,47 @@ fn note_is_visible_in_root(note: &KnowledgeNote, kb_root: &Path) -> bool {
         && kb_service::is_note_path_in_root(Path::new(&note.file_path), kb_root)
 }
 
+/// Brings the DB index in line with the files on disk. Only files whose
+/// mtime changed since they were last indexed are read.
 fn sync_kb_index(state: &AppState) -> Result<std::path::PathBuf, String> {
     let kb_root = get_kb_root(state);
-    let scanned_notes = kb_service::scan_kb_notes(&kb_root);
+    let files = kb_service::list_note_files(&kb_root);
 
     let db = state.db();
     db.dedupe_knowledge_notes_by_file_path()
         .map_err(|e| format!("Failed to dedupe notes: {}", e))?;
 
-    for scanned in scanned_notes {
-        let file_path = scanned.file_path.to_string_lossy().to_string();
+    for (path, modified) in files {
+        let file_path = path.to_string_lossy().to_string();
         let existing = db
             .get_knowledge_note_by_file_path(&file_path)
             .map_err(|e| format!("Failed to get note by file path: {}", e))?;
 
-        match existing {
-            Some(note)
+        if let Some(ref note) = existing {
+            if db.get_note_file_mtime(note.id).unwrap_or(0) == modified {
+                continue;
+            }
+        }
+
+        let scanned = kb_service::index_note_file(&kb_root, &path);
+        let id = match existing {
+            Some(note) => {
                 if note.title != scanned.title
                     || note.category_path != scanned.category_path
-                    || note.tags != scanned.tags =>
-            {
-                db.update_knowledge_note(
-                    note.id,
-                    &scanned.title,
-                    &scanned.category_path,
-                    &file_path,
-                    &scanned.tags,
-                    &note.links_to,
-                )
-                .map_err(|e| format!("Failed to sync KB note metadata: {}", e))?;
+                    || note.tags != scanned.tags
+                {
+                    db.update_knowledge_note(
+                        note.id,
+                        &scanned.title,
+                        &scanned.category_path,
+                        &file_path,
+                        &scanned.tags,
+                        &note.links_to,
+                    )
+                    .map_err(|e| format!("Failed to sync KB note metadata: {}", e))?;
+                }
+                note.id
             }
-            Some(_) => {}
             None => {
                 db.create_knowledge_note(
                     None,
@@ -121,12 +131,56 @@ fn sync_kb_index(state: &AppState) -> Result<std::path::PathBuf, String> {
                     None,
                     &[],
                 )
-                .map_err(|e| format!("Failed to index KB note: {}", e))?;
+                .map_err(|e| format!("Failed to index KB note: {}", e))?
+                .id
             }
-        }
+        };
+
+        db.index_note_content(
+            id,
+            &scanned.title,
+            &scanned.tags,
+            &scanned.category_path,
+            &scanned.content,
+            modified,
+        )
+        .map_err(|e| format!("Failed to index KB note content: {}", e))?;
     }
 
+    db.prune_note_index()
+        .map_err(|e| format!("Failed to prune KB index: {}", e))?;
+
     Ok(kb_root)
+}
+
+/// Notes matching any of `terms`, best first, found through the full-text
+/// index (no LLM involved). Used to seed prompts with relevant notes.
+pub(crate) fn find_related_notes(
+    state: &AppState,
+    terms: &[String],
+    exclude_file: Option<&Path>,
+    limit: usize,
+) -> Vec<kb_service::RelatedNote> {
+    let Some(query) = kb_service::fts_any_terms_query(terms) else {
+        return Vec::new();
+    };
+    let Ok(kb_root) = sync_kb_index(state) else {
+        return Vec::new();
+    };
+    let db = state.db();
+    db.search_note_index(&query, limit + 1)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(note, _)| note_is_visible_in_root(note, &kb_root))
+        .filter(|(note, _)| exclude_file.is_none_or(|ex| Path::new(&note.file_path) != ex))
+        .take(limit)
+        .map(|(note, content)| kb_service::RelatedNote {
+            title: note.title,
+            category_path: note.category_path,
+            file_path: note.file_path,
+            excerpt: kb_service::note_excerpt(&content, 600),
+        })
+        .collect()
 }
 
 fn list_visible_notes(state: &AppState) -> Result<Vec<KnowledgeNote>, String> {
@@ -229,18 +283,18 @@ pub async fn search_notes(
     state: State<'_, AppState>,
     query: String,
 ) -> Result<Vec<KnowledgeNoteDto>, String> {
-    let query = query.trim().to_lowercase();
-    let notes = list_visible_notes(state.inner())?;
-    Ok(notes
+    let Some(match_query) = kb_service::fts_user_query(&query) else {
+        return get_notes(state).await;
+    };
+    let kb_root = sync_kb_index(state.inner())?;
+    let db = state.db();
+    let results = db
+        .search_note_index(&match_query, 200)
+        .map_err(|e| format!("Failed to search notes: {}", e))?;
+    Ok(results
         .iter()
-        .map(note_to_dto)
-        .filter(|note| {
-            query.is_empty()
-                || note.title.to_lowercase().contains(&query)
-                || note.category_path.to_lowercase().contains(&query)
-                || note.tags.iter().any(|t| t.to_lowercase().contains(&query))
-                || note.content.to_lowercase().contains(&query)
-        })
+        .filter(|(note, _)| note_is_visible_in_root(note, &kb_root))
+        .map(|(note, _)| note_to_dto(note))
         .collect())
 }
 
@@ -344,6 +398,20 @@ pub async fn write_to_kb(
         }
         .map(|raw| kb_service::strip_yaml_frontmatter(&raw));
 
+        let search_text = format!(
+            "{} {} {} {}",
+            suggested.title,
+            suggested.tags.join(" "),
+            suggested.links_to.join(" "),
+            category.replace('/', " ")
+        );
+        let related = find_related_notes(
+            state.inner(),
+            &kb_service::extract_search_terms(&search_text, 12),
+            Some(&preferred_existing_path),
+            4,
+        );
+
         let note_input = ai::KbNoteInput {
             title: suggested.title.clone(),
             category: category.clone(),
@@ -356,6 +424,7 @@ pub async fn write_to_kb(
             project_name: project_name.clone(),
             existing_titles: existing_titles.clone(),
             existing_notes_catalog: existing_notes_catalog.clone(),
+            related_notes: kb_service::format_related_notes(&related),
         };
 
         // Generate note with retries

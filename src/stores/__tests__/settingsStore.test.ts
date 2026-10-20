@@ -30,6 +30,18 @@ describe('settingsStore', () => {
     expect(state.loading).toBe(false)
   })
 
+  it('keeps the latest value when updates resolve out of order', async () => {
+    await useSettingsStore.getState().loadSettings()
+    const { updateSettings } = useSettingsStore.getState()
+    const typed = ['/', '/r', '/re', '/rep', '/repo']
+    const pending = typed.map((fileExtensions) =>
+      updateSettings({ project: { fileExtensions } as never }),
+    )
+    expect(useSettingsStore.getState().settings!.project.fileExtensions).toBe('/repo')
+    await Promise.all(pending)
+    expect(useSettingsStore.getState().settings!.project.fileExtensions).toBe('/repo')
+  })
+
   it('loads skills', async () => {
     await useSettingsStore.getState().loadSkills()
     const state = useSettingsStore.getState()

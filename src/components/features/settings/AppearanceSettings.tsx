@@ -76,7 +76,7 @@ export default function AppearanceSettings({ settings, theme, onSetTheme, onUpda
           onChange={(e) => onUpdate({ appearance: { ...settings.appearance, debriefLanguage: e.target.value as 'english' | 'portuguese' | 'auto' } })}
         >
           <option value="english">English</option>
-          <option value="portuguese">Portugus</option>
+          <option value="portuguese">Português</option>
           <option value="auto">Auto-detect</option>
         </select>
       </div>

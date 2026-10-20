@@ -6,6 +6,7 @@ import DiffViewer from '@/components/features/debrief/DiffViewer.tsx'
 import DebriefPanel from '@/components/features/debrief/DebriefPanel.tsx'
 import ResizablePanel from '@/components/features/debrief/ResizablePanel.tsx'
 import DebriefProgress from '@/components/features/debrief/DebriefProgress.tsx'
+import Button from '@/components/ui/Button.tsx'
 import toast from 'react-hot-toast'
 
 export default function Debrief() {
@@ -231,6 +232,13 @@ export default function Debrief() {
               >
                 {rawDebriefText}
               </pre>
+            </div>
+          ) : error?.endsWith('Cancelled') ? (
+            <div className="font-mono" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Analysis cancelled.</span>
+              <Button variant="secondary" size="sm" onClick={() => commitHash && void loadDebrief(commitHash)}>
+                Run again
+              </Button>
             </div>
           ) : (
             <div className="font-mono" style={{ padding: 20, fontSize: 13, color: 'var(--text-tertiary)' }}>

@@ -16,6 +16,18 @@ interface SettingsState {
   testConnection: () => Promise<void>
 }
 
+let latestUpdateId = 0
+
+function mergeSettings(current: AppSettings, partial: Partial<AppSettings>): AppSettings {
+  return {
+    project: { ...current.project, ...partial.project },
+    ai: { ...current.ai, ...partial.ai },
+    analysis: { ...current.analysis, ...partial.analysis },
+    knowledge: { ...current.knowledge, ...partial.knowledge },
+    appearance: { ...current.appearance, ...partial.appearance },
+  }
+}
+
 export const useSettingsStore = create<SettingsState>((set) => ({
   settings: null,
   skills: [],
@@ -34,9 +46,14 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
 
   updateSettings: async (partial) => {
+    // Apply immediately so inputs stay responsive, and ignore responses from
+    // superseded requests: they can resolve out of order and would revert
+    // characters the user has typed since.
+    const requestId = ++latestUpdateId
+    set((state) => ({ settings: state.settings && mergeSettings(state.settings, partial) }))
     try {
       const settings = await settingsService.updateSettings(partial)
-      set({ settings })
+      if (requestId === latestUpdateId) set({ settings })
     } catch (e) {
       set({ error: (e as Error).message })
     }

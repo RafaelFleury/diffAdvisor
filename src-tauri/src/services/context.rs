@@ -304,7 +304,7 @@ pub fn assemble_agentic_user_message(
 ## How to Investigate\n\
 You are running inside the project repository with read-only tools.\n\
 1. Read the full diff at `{diff_path}`. If it is long, read it in chunks using offsets until you have seen all of it.\n\
-2. Read the changed files and whatever surrounds them that you need to judge the change: callers, imported modules, configuration, middleware, tests.\n\
+2. Read the changed files, and every local module they import or that the change wires in (middleware, helpers, config). Then read whatever else you need to judge the change: callers, configuration, tests.\n\
 3. Before reporting a gap, check whether it is already handled elsewhere in the repository (e.g. validation, rate limiting or auth implemented in shared middleware). Only report gaps that are actually missing.\n\
 4. Do not try to modify files or run commands; you only have read access.\n\n\
 When you are done, reply with ONLY the JSON object described in the instructions above, with no other text.\n",

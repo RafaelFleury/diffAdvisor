@@ -16,7 +16,8 @@ import {
 // IMPORTANT:
 // Mock services are disabled by default and only enabled when this flag is explicitly set to true.
 const ENABLE_MOCK_SERVICES = false
-const USE_MOCK = ENABLE_MOCK_SERVICES
+// Tests always run against the mocks, regardless of the flag.
+const USE_MOCK = ENABLE_MOCK_SERVICES || import.meta.env.MODE === 'test'
 export const IS_MOCK_SERVICES = USE_MOCK
 
 export const projectService = USE_MOCK ? new MockProjectService() : new TauriProjectService()

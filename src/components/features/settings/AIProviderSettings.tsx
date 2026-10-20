@@ -146,12 +146,18 @@ export default function AIProviderSettings({ settings, connectionTestResult, onU
                   className="font-mono"
                   style={{
                     fontSize: 12,
-                    color: opencodeStatus?.installed ? 'var(--success)' : 'var(--warning)',
+                    color: !opencodeStatus
+                      ? 'var(--text-tertiary)'
+                      : opencodeStatus.installed
+                        ? 'var(--success)'
+                        : 'var(--warning)',
                   }}
                 >
-                  {checkingOpencode && !opencodeStatus
-                    ? 'Checking...'
-                    : opencodeStatus?.installed
+                  {!opencodeStatus
+                    ? opencodeError
+                      ? 'Check failed'
+                      : 'Checking...'
+                    : opencodeStatus.installed
                       ? `Installed${opencodeStatus.version ? ` (v${opencodeStatus.version})` : ''}`
                       : 'Not found'}
                 </span>

@@ -291,6 +291,9 @@ fn describe_tool(part: &serde_json::Value, workdir: &Path) -> String {
     let failed = part["state"]["status"].as_str() == Some("error");
 
     let message = match tool {
+        "read" if field("filePath").ends_with(".diff") && !Path::new(field("filePath")).starts_with(workdir) => {
+            "Reading the commit diff".to_string()
+        }
         "read" => format!("Reading {}", relative(field("filePath"))),
         "grep" => format!("Searching for \"{}\"", field("pattern")),
         "glob" => format!("Finding files {}", field("pattern")),
@@ -355,6 +358,9 @@ opencode/old-free
             r#"{"type":"text","part":{"text":"{\"ok\":"}}"#,
             r#"{"type":"text","part":{"text":"true}"}}"#,
         ];
+        let diff_read = r#"{"type":"tool_use","part":{"tool":"read","state":{"status":"completed","input":{"filePath":"/tmp/diffs/abc.diff"}}}}"#;
+        assert_eq!(state.handle_event(diff_read, workdir).as_deref(), Some("Reading the commit diff"));
+
         let progress: Vec<String> = events
             .iter()
             .filter_map(|e| state.handle_event(e, workdir))

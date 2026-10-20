@@ -172,6 +172,12 @@ export class TauriKnowledgeService implements IKnowledgeService {
       noteIndices,
     })
   }
+
+  onKbProgress(debriefId: string, callback: (message: string) => void): Promise<() => void> {
+    return listen<{ debriefId: number; message: string }>('kb_progress', (event) => {
+      if (String(event.payload.debriefId) === debriefId) callback(event.payload.message)
+    })
+  }
 }
 
 export class TauriSettingsService implements ISettingsService {

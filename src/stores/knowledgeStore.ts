@@ -55,7 +55,8 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     set({ searchQuery: query })
     try {
       const filteredNotes = await knowledgeService.searchNotes(query)
-      set({ filteredNotes })
+      // Results for an older query can arrive after newer ones while typing.
+      if (get().searchQuery === query) set({ filteredNotes })
     } catch (e) {
       set({ error: (e as Error).message })
     }

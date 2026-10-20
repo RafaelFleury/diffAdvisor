@@ -286,6 +286,7 @@ pub fn assemble_agentic_user_message(
     changed_files: &[String],
     history: &[String],
     diff_path: &str,
+    knowledge_base_path: Option<&str>,
 ) -> String {
     let mut files: Vec<&String> = changed_files.iter().collect();
     files.sort_by_key(|f| file_priority(f));
@@ -297,9 +298,22 @@ pub fn assemble_agentic_user_message(
         format!("\n## Recent History\n{}\n", history.join("\n"))
     };
 
+    let knowledge_base_section = match knowledge_base_path {
+        Some(path) => format!(
+            "\n## Developer's Knowledge Base\n\
+Notes the developer has already written are in `{path}` (Markdown, organized in category folders). \
+Search it (glob `**/*.md`, grep key concepts) before writing `suggested_notes`:\n\
+- If a concept is already covered, suggest updating that note (same title and category) instead of creating a new one.\n\
+- Use exact existing note titles in `links_to`.\n\
+- Don't re-teach what the developer already documented; point to the note and focus on what is new in this change.\n",
+            path = path
+        ),
+        None => String::new(),
+    };
+
     format!(
         "## Commit\nHash: {hash}\nMessage: {message}\nAuthor: {author}\nDate: {date}\nFiles changed: {files_changed} (+{additions} -{deletions})\n\
-{history_section}\n\
+{history_section}{knowledge_base_section}\n\
 ## Changed Files (most review-relevant first)\n{file_list}\n\n\
 ## How to Investigate\n\
 You are running inside the project repository with read-only tools.\n\
@@ -316,6 +330,7 @@ When you are done, reply with ONLY the JSON object described in the instructions
         additions = commit.additions,
         deletions = commit.deletions,
         history_section = history_section,
+        knowledge_base_section = knowledge_base_section,
         file_list = file_list.join("\n"),
         diff_path = diff_path,
     )
@@ -417,12 +432,17 @@ mod tests {
             deletions: 1,
         };
         let files = vec!["src/README.md".to_string(), "src/auth/login.ts".to_string()];
-        let message = assemble_agentic_user_message(&commit, &files, &[], "/tmp/abc123.diff");
+        let message = assemble_agentic_user_message(&commit, &files, &[], "/tmp/abc123.diff", None);
 
         assert!(message.contains("`/tmp/abc123.diff`"));
         let auth = message.find("src/auth/login.ts").unwrap();
         let readme = message.find("src/README.md").unwrap();
         assert!(auth < readme);
         assert!(!message.contains("## Recent History"));
+        assert!(!message.contains("Knowledge Base"));
+
+        let with_kb =
+            assemble_agentic_user_message(&commit, &files, &[], "/tmp/abc123.diff", Some("/home/dev/kb"));
+        assert!(with_kb.contains("`/home/dev/kb`"));
     }
 }

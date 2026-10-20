@@ -334,10 +334,13 @@ pub async fn run_debrief(
     };
 
     let diffs_dir = llm::opencode_dir("diffs")?;
+    let kb_root = Some(super::knowledge::get_kb_root(&state)).filter(|dir| dir.is_dir());
+    let mut readable_dirs = vec![diffs_dir.clone()];
+    readable_dirs.extend(kb_root.clone());
     let mut llm_config = llm::load_llm_config(
         &state,
         Some(Path::new(&project_path)),
-        vec![diffs_dir.clone()],
+        readable_dirs,
         DEBRIEF_TIMEOUT,
     )
     .await?;
@@ -459,6 +462,7 @@ pub async fn run_debrief(
             &changed_files,
             &history,
             &diff_file.to_string_lossy(),
+            kb_root.as_deref().map(|dir| dir.to_str().unwrap_or_default()),
         );
         (message, Vec::new())
     } else {

@@ -59,8 +59,22 @@ pub fn sanitize_filename(title: &str) -> String {
     }
 }
 
+/// Turns a category (often LLM-provided) into a relative path that stays
+/// inside the KB root: no `..`, no absolute paths, no drive prefixes.
+pub fn sanitize_category(category: &str) -> String {
+    category
+        .split(['/', '\\'])
+        .map(|part| sanitize_filename(part).trim().trim_matches('.').trim().to_string())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 pub fn ensure_kb_dir(kb_path: &Path, category: &str) -> Result<PathBuf, String> {
-    let dir = kb_path.join(category);
+    let dir = kb_path.join(sanitize_category(category));
+    if !dir.starts_with(kb_path) {
+        return Err(format!("Refusing to write outside the knowledge base: {:?}", dir));
+    }
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create KB directory {:?}: {}", dir, e))?;
     Ok(dir)
 }
@@ -296,6 +310,23 @@ pub fn expand_kb_path(path_str: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_category_stays_inside_root() {
+        assert_eq!(sanitize_category("security/rate-limiting"), "security/rate-limiting");
+        assert_eq!(sanitize_category("../../.config/autostart"), "config/autostart");
+        assert_eq!(sanitize_category("/etc/cron.d"), "etc/cron.d");
+        assert_eq!(sanitize_category("C:\\Windows\\..\\x"), "C/Windows/x");
+        assert_eq!(sanitize_category(" . / .. "), "");
+    }
+
+    #[test]
+    fn test_ensure_kb_dir_never_escapes_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = ensure_kb_dir(temp.path(), "../../outside").unwrap();
+        assert_eq!(dir, temp.path().join("outside"));
+        assert!(dir.exists());
+    }
 
     #[test]
     fn test_sanitize_filename_truncates_on_char_boundary() {

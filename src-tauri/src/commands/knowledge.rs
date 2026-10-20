@@ -1,10 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tauri::State;
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::db::models::KnowledgeNote;
 use crate::services::{ai, knowledge as kb_service};
 use crate::state::AppState;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KbProgressEvent {
+    debrief_id: i64,
+    message: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,7 +68,7 @@ fn get_kb_path_str(state: &AppState) -> String {
         .unwrap_or_else(|| "~/knowledge_base".to_string())
 }
 
-fn get_kb_root(state: &AppState) -> std::path::PathBuf {
+pub(crate) fn get_kb_root(state: &AppState) -> std::path::PathBuf {
     kb_service::expand_kb_path(&get_kb_path_str(state))
 }
 
@@ -164,6 +172,7 @@ pub async fn save_note(
     tags: Vec<String>,
     note_id: Option<i64>,
 ) -> Result<KnowledgeNoteDto, String> {
+    let category_path = kb_service::sanitize_category(&category_path);
     let kb_path = get_kb_root(state.inner());
     let dir = kb_service::ensure_kb_dir(&kb_path, &category_path)?;
 
@@ -205,8 +214,9 @@ pub async fn delete_note(state: State<'_, AppState>, note_id: i64) -> Result<(),
     let db = state.db();
     // Get the note to find the file path
     if let Ok(note) = db.get_knowledge_note(note_id) {
-        if !note.file_path.is_empty() {
-            let _ = std::fs::remove_file(&note.file_path);
+        let path = Path::new(&note.file_path);
+        if !note.file_path.is_empty() && kb_service::is_note_path_in_root(path, &get_kb_root(state.inner())) {
+            let _ = std::fs::remove_file(path);
         }
     }
 
@@ -219,21 +229,24 @@ pub async fn search_notes(
     state: State<'_, AppState>,
     query: String,
 ) -> Result<Vec<KnowledgeNoteDto>, String> {
-    let kb_root = sync_kb_index(state.inner())?;
-    let db = state.db();
-    let notes = db
-        .search_knowledge_notes(&query)
-        .map_err(|e| format!("Failed to search notes: {}", e))?;
-
+    let query = query.trim().to_lowercase();
+    let notes = list_visible_notes(state.inner())?;
     Ok(notes
-        .into_iter()
-        .filter(|note| note_is_visible_in_root(note, &kb_root))
-        .map(|note| note_to_dto(&note))
+        .iter()
+        .map(note_to_dto)
+        .filter(|note| {
+            query.is_empty()
+                || note.title.to_lowercase().contains(&query)
+                || note.category_path.to_lowercase().contains(&query)
+                || note.tags.iter().any(|t| t.to_lowercase().contains(&query))
+                || note.content.to_lowercase().contains(&query)
+        })
         .collect())
 }
 
 #[tauri::command]
 pub async fn write_to_kb(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     debrief_id: i64,
     note_indices: Vec<usize>,
@@ -260,13 +273,30 @@ pub async fn write_to_kb(
 
     // 2. Get settings
     let kb_path = sync_kb_index(state.inner())?;
-    let ai_config = super::llm::load_llm_config(
+    // The agent runs inside the KB so it can read related notes itself; the app
+    // still does all the writing.
+    let mut ai_config = super::llm::load_llm_config(
         state.inner(),
-        None,
+        Some(&kb_path),
         Vec::new(),
         std::time::Duration::from_secs(5 * 60),
     )
     .await?;
+    let emit_progress = {
+        let handle = app_handle.clone();
+        Arc::new(move |message: &str| {
+            let _ = handle.emit(
+                "kb_progress",
+                KbProgressEvent {
+                    debrief_id,
+                    message: message.to_string(),
+                },
+            );
+        })
+    };
+    if let ai::LlmConfig::Opencode(ref mut oc) = ai_config {
+        oc.progress = Some(emit_progress.clone());
+    }
 
     // 3. Get existing KB notes catalog
     let existing_kb_notes = kb_service::list_existing_note_titles(&kb_path);
@@ -292,16 +322,19 @@ pub async fn write_to_kb(
     // 5. Process each selected note
     let mut created_notes = Vec::new();
 
-    for idx in note_indices {
+    let total = note_indices.len();
+    for (position, idx) in note_indices.into_iter().enumerate() {
         if idx >= ai_response.suggested_notes.len() {
             continue;
         }
 
         let suggested = &ai_response.suggested_notes[idx];
+        let category = kb_service::sanitize_category(&suggested.category);
+        emit_progress(&format!("Note {}/{}: {}", position + 1, total, suggested.title));
 
         // Check for existing note (prefer category+title exact path, fallback to title lookup)
         let preferred_existing_path = kb_path
-            .join(&suggested.category)
+            .join(&category)
             .join(format!("{}.md", kb_service::sanitize_filename(&suggested.title)));
         let existing_content = if preferred_existing_path.exists() {
             std::fs::read_to_string(&preferred_existing_path).ok()
@@ -313,7 +346,7 @@ pub async fn write_to_kb(
 
         let note_input = ai::KbNoteInput {
             title: suggested.title.clone(),
-            category: suggested.category.clone(),
+            category: category.clone(),
             tags: suggested.tags.clone(),
             links_to: suggested.links_to.clone(),
             existing_content,
@@ -344,7 +377,7 @@ pub async fn write_to_kb(
 
         if let Some(generated) = kb_note {
             // Resolve deterministic file path to avoid duplicates across repeated saves
-            let dir = kb_service::ensure_kb_dir(&kb_path, &suggested.category)?;
+            let dir = kb_service::ensure_kb_dir(&kb_path, &category)?;
             let preferred_filename = kb_service::sanitize_filename(&suggested.title);
             let generated_filename = kb_service::sanitize_filename(&generated.title);
             let preferred_path = dir.join(format!("{}.md", preferred_filename));
@@ -373,7 +406,7 @@ pub async fn write_to_kb(
             let fm = kb_service::NoteFrontmatter {
                 title: generated.title.clone(),
                 tags: suggested.tags.clone(),
-                category: suggested.category.clone(),
+                category: category.clone(),
                 source_project: project_name.clone(),
                 source_commit: commit_hash.clone(),
                 auto_generated: true,
@@ -388,7 +421,7 @@ pub async fn write_to_kb(
                 db.update_knowledge_note(
                     existing.id,
                     &generated.title,
-                    &suggested.category,
+                    &category,
                     &file_path_str,
                     &suggested.tags,
                     &suggested.links_to,
@@ -400,7 +433,7 @@ pub async fn write_to_kb(
                 db.create_knowledge_note(
                     Some(debrief.project_id),
                     &generated.title,
-                    &suggested.category,
+                    &category,
                     &file_path_str,
                     true,
                     &suggested.tags,

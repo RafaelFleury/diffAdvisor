@@ -252,6 +252,17 @@ pub async fn generate_kb_note(
 - Use ### for sub-section headings
 
 Respond ONLY with valid JSON: {"title": "<note title>", "content": "<markdown body without frontmatter>"}"#;
+    let system = if config.is_agentic() {
+        format!(
+            "{}\n\nYou are running inside the developer's knowledge base folder with read-only tools. \
+Before writing, search it (glob `**/*.md`, grep for the key concepts) and read the closest related notes. \
+Link to them using their exact titles, and do not repeat explanations they already cover; reference them instead. \
+Do not try to create or modify files: return the note as JSON and the app will save it.",
+            system
+        )
+    } else {
+        system.to_string()
+    };
 
     let existing_titles_str = if note_input.existing_titles.is_empty() {
         String::new()
@@ -289,7 +300,7 @@ Respond ONLY with valid JSON: {"title": "<note title>", "content": "<markdown bo
         existing_content_str,
     );
 
-    let result = call_chat_completion(config, system, &user, 0.3, Duration::from_secs(90)).await?;
+    let result = call_chat_completion(config, &system, &user, 0.3, Duration::from_secs(90)).await?;
     let mut parsed = parse_json_response::<KbNoteResponse>(&result.content)?;
     parsed.content = normalize_kb_note_markdown(&parsed.title, &parsed.content);
     Ok(parsed)

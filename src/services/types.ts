@@ -50,6 +50,8 @@ export interface IKnowledgeService {
   deleteNote(noteId: string): Promise<void>
   searchNotes(query: string): Promise<KnowledgeNote[]>
   writeToKb(debriefId: string, noteIndices: number[]): Promise<KnowledgeNote[]>
+  /** Streams progress while writeToKb generates notes. Resolves to an unsubscribe function. */
+  onKbProgress(debriefId: string, callback: (message: string) => void): Promise<() => void>
 }
 
 export interface ISettingsService {

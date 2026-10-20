@@ -1095,6 +1095,10 @@ export class MockKnowledgeService implements IKnowledgeService {
     await delay()
     return []
   }
+
+  async onKbProgress(_debriefId: string, _callback: (message: string) => void): Promise<() => void> {
+    return () => {}
+  }
 }
 
 export class MockSettingsService implements ISettingsService {

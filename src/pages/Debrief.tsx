@@ -57,16 +57,26 @@ export default function Debrief() {
     }
 
     setSavingToKb(true)
+    const toastId = toast.loading('Saving to Knowledge Base...')
+    let currentNote = ''
+    const unsubscribe = await knowledgeService
+      .onKbProgress(currentDebrief.id, (message) => {
+        if (message.startsWith('Note ')) currentNote = message
+        const detail = message === currentNote ? '' : ` · ${message}`
+        toast.loading(`${currentNote || 'Saving to Knowledge Base...'}${detail}`, { id: toastId })
+      })
+      .catch(() => () => {})
     try {
       const created = await knowledgeService.writeToKb(currentDebrief.id, noteIndices)
       if (created.length === 0) {
-        toast.error('No notes were written to Knowledge Base')
+        toast.error('No notes were written to Knowledge Base', { id: toastId })
         return
       }
-      toast.success(`Saved ${created.length} note${created.length > 1 ? 's' : ''} to Knowledge Base`)
+      toast.success(`Saved ${created.length} note${created.length > 1 ? 's' : ''} to Knowledge Base`, { id: toastId })
     } catch (e) {
-      toast.error(`Failed to save to Knowledge Base: ${(e as Error).message}`)
+      toast.error(`Failed to save to Knowledge Base: ${(e as Error).message}`, { id: toastId })
     } finally {
+      unsubscribe()
       setSavingToKb(false)
     }
   }

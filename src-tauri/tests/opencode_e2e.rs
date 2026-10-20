@@ -75,6 +75,7 @@ async fn debrief_explores_files_outside_the_diff() {
         &["server.js".to_string()],
         &[],
         &diff_file.to_string_lossy(),
+        None,
     );
     let result = ai::run_debrief(&config, system, &user).await.expect("debrief failed");
 

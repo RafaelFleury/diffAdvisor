@@ -282,11 +282,16 @@ fn describe_tool(part: &serde_json::Value, workdir: &Path) -> String {
     let tool = part["tool"].as_str().unwrap_or("tool");
     let input = &part["state"]["input"];
     let field = |key: &str| input[key].as_str().unwrap_or_default();
+    // Paths outside the working directory (e.g. knowledge base notes) are shown by name only.
     let relative = |path: &str| {
-        Path::new(path)
-            .strip_prefix(workdir)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| path.to_string())
+        let path = Path::new(path);
+        match path.strip_prefix(workdir) {
+            Ok(rel) => rel.to_string_lossy().to_string(),
+            Err(_) => path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string()),
+        }
     };
     let failed = part["state"]["status"].as_str() == Some("error");
 
@@ -379,7 +384,7 @@ opencode/old-free
             r#"{"type":"tool_use","part":{"tool":"read","state":{"status":"error","input":{"filePath":"/etc/passwd"}}}}"#,
             workdir,
         );
-        assert_eq!(blocked.as_deref(), Some("Reading /etc/passwd (blocked)"));
+        assert_eq!(blocked.as_deref(), Some("Reading passwd (blocked)"));
 
         state.handle_event(
             r#"{"type":"error","error":{"name":"UnknownError","data":{"message":"Model not found"}}}"#,

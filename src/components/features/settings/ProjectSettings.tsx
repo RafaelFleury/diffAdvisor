@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Toggle from '@/components/ui/Toggle.tsx'
 import type { AppSettings } from '@/types/index.ts'
 import { projectService } from '@/services/index.ts'
 import { useProjectStore } from '@/stores/projectStore.ts'
@@ -166,6 +167,25 @@ export default function ProjectSettings({ settings, onUpdate }: ProjectSettingsP
           onChange={(e) => onUpdate({ project: { fileExtensions: e.target.value } as AppSettings['project'] })}
         />
       </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Commit Authors</span>
+        <Toggle
+          checked={settings.project.onlyMyCommits}
+          onChange={(onlyMyCommits) => onUpdate({ project: { onlyMyCommits } as AppSettings['project'] })}
+          label="Only show my commits (git user.email)"
+        />
+      </div>
+      {settings.project.onlyMyCommits && (
+        <div style={rowStyle}>
+          <span style={labelStyle}>Other Emails</span>
+          <input
+            style={inputStyle}
+            value={settings.project.extraAuthorEmails}
+            onChange={(e) => onUpdate({ project: { extraAuthorEmails: e.target.value } as AppSettings['project'] })}
+            placeholder="me@work.com, me@personal.com"
+          />
+        </div>
+      )}
       <div style={{ ...rowStyle, borderBottom: 'none', alignItems: 'flex-start' }}>
         <span style={{ ...labelStyle, paddingTop: 2 }}>Ignored Paths</span>
         <div style={{ flex: 1 }}>

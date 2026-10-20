@@ -7,6 +7,8 @@ export interface ProjectSettings {
   fileExtensions: string
   ignoredPaths: string
   hasGitignore: boolean
+  onlyMyCommits: boolean
+  extraAuthorEmails: string
 }
 
 export interface AISettings {

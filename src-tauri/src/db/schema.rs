@@ -27,6 +27,9 @@ pub fn run_migrations(conn: &Connection) -> DbResult<()> {
         migration_002(conn)?;
     }
 
+    // Idempotent: adds defaults for settings introduced after the database was created.
+    seed_default_settings(conn)?;
+
     if version < CURRENT_VERSION {
         conn.execute(
             "INSERT INTO schema_version (version) VALUES (?1)",
@@ -117,8 +120,6 @@ fn migration_001(conn: &Connection) -> DbResult<()> {
     )
     .map_err(|e| DbError::MigrationError(e.to_string()))?;
 
-    seed_default_settings(conn)?;
-
     Ok(())
 }
 
@@ -142,6 +143,8 @@ fn seed_default_settings(conn: &Connection) -> DbResult<()> {
         ("project.fileExtensions", ".ts,.tsx,.js,.jsx,.py,.rs,.go,.java"),
         ("project.ignoredPaths", "node_modules,.git,dist,__pycache__,target"),
         ("project.hasGitignore", "false"),
+        ("project.onlyMyCommits", "true"),
+        ("project.extraAuthorEmails", ""),
         ("ai.endpointUrl", "https://api.openai.com/v1"),
         ("ai.model", "gpt-4.1"),
         ("ai.apiKey", ""),

@@ -30,11 +30,31 @@ pub fn is_git_repo(path: &str) -> bool {
 const LOG_FORMAT: &str = "--format=%x1e%H%x1f%s%x1f%an%x1f%aI";
 
 /// Lists commits reachable from HEAD, newest first, with diff stats.
-pub fn list_commits(repo_path: &str, skip: usize, limit: usize) -> Result<Vec<CommitInfo>, String> {
-    run_log(
-        repo_path,
-        &[format!("--skip={}", skip), format!("--max-count={}", limit)],
-    )
+/// When `author_emails` is non-empty, only commits by those authors are returned.
+pub fn list_commits(
+    repo_path: &str,
+    skip: usize,
+    limit: usize,
+    author_emails: &[String],
+) -> Result<Vec<CommitInfo>, String> {
+    let mut args = vec![format!("--skip={}", skip), format!("--max-count={}", limit)];
+    if !author_emails.is_empty() {
+        args.push("--fixed-strings".to_string());
+        args.push("--regexp-ignore-case".to_string());
+        args.extend(author_emails.iter().map(|email| format!("--author=<{}>", email)));
+    }
+    run_log(repo_path, &args)
+}
+
+/// The `user.email` git would use for new commits in this repository.
+pub fn local_user_email(repo_path: &str) -> Option<String> {
+    let output = Command::new("git")
+        .args(["config", "user.email"])
+        .current_dir(repo_path)
+        .output()
+        .ok()?;
+    let email = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (output.status.success() && !email.is_empty()).then_some(email)
 }
 
 /// Looks up specific commits by hash. Hashes that no longer exist are skipped.
@@ -294,11 +314,17 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         git(temp.path(), &["init", "-q"]);
         for (i, message) in messages.iter().enumerate() {
-            std::fs::write(temp.path().join(format!("f{}.txt", i)), "a\nb\n").unwrap();
-            git(temp.path(), &["add", "."]);
-            git(temp.path(), &["commit", "-q", "-m", message]);
+            commit_file(temp.path(), &format!("f{}.txt", i), message, &[]);
         }
         temp
+    }
+
+    fn commit_file(dir: &Path, file: &str, message: &str, identity: &[&str]) {
+        std::fs::write(dir.join(file), "a\nb\n").unwrap();
+        git(dir, &["add", "."]);
+        let mut args = identity.to_vec();
+        args.extend(["commit", "-q", "-m", message]);
+        git(dir, &args);
     }
 
     #[test]
@@ -306,14 +332,14 @@ mod tests {
         let repo = repo_with_commits(&["first", "second | with pipe", "terceiro ção"]);
         let path = repo.path().to_str().unwrap();
 
-        let page = list_commits(path, 0, 2).unwrap();
+        let page = list_commits(path, 0, 2, &[]).unwrap();
         assert_eq!(page.len(), 2);
         assert_eq!(page[0].message, "terceiro ção");
         assert_eq!(page[1].message, "second | with pipe");
         assert_eq!(page[1].author, "Tester");
         assert_eq!((page[1].files_changed, page[1].additions, page[1].deletions), (1, 2, 0));
 
-        let rest = list_commits(path, 2, 2).unwrap();
+        let rest = list_commits(path, 2, 2, &[]).unwrap();
         assert_eq!(rest.len(), 1);
         assert_eq!(rest[0].message, "first");
         assert_eq!(rest[0].files_changed, 1);
@@ -323,11 +349,34 @@ mod tests {
     fn get_commits_skips_missing_hashes() {
         let repo = repo_with_commits(&["only"]);
         let path = repo.path().to_str().unwrap();
-        let head = list_commits(path, 0, 1).unwrap().remove(0);
+        let head = list_commits(path, 0, 1, &[]).unwrap().remove(0);
 
         let found = get_commits(path, &[head.hash.clone(), "f".repeat(40)]).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].hash, head.hash);
         assert!(get_commit(path, &"f".repeat(40)).is_err());
+    }
+
+    #[test]
+    fn list_commits_filters_by_author_email() {
+        let repo = repo_with_commits(&["mine"]);
+        let dir = repo.path();
+        let teammate = ["-c", "user.name=Mate", "-c", "user.email=mate@example.com"];
+        commit_file(dir, "other.txt", "theirs", &teammate);
+        commit_file(dir, "again.txt", "mine again", &[]);
+        let path = dir.to_str().unwrap();
+
+        let mine = list_commits(path, 0, 10, &["TESTER@example.com".to_string()]).unwrap();
+        let messages: Vec<&str> = mine.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(messages, ["mine again", "mine"]);
+
+        let both = list_commits(
+            path,
+            0,
+            10,
+            &["tester@example.com".to_string(), "mate@example.com".to_string()],
+        )
+        .unwrap();
+        assert_eq!(both.len(), 3);
     }
 }

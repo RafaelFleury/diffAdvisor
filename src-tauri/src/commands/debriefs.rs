@@ -152,7 +152,7 @@ pub async fn get_pending_commits(
     limit: Option<usize>,
 ) -> Result<PendingCommitsDto, String> {
     let limit = limit.unwrap_or(DEFAULT_COMMIT_PAGE_SIZE);
-    let (project_path, reviewed_hashes) = {
+    let (project_path, reviewed_hashes, only_my_commits, extra_author_emails) = {
         let db = state.db();
         let project = db
             .get_project(project_id)
@@ -163,10 +163,26 @@ pub async fn get_pending_commits(
             .into_iter()
             .map(|d| d.commit_hash)
             .collect();
-        (project.path, reviewed_hashes)
+        let only_my_commits = db.get_setting("project.onlyMyCommits").ok().flatten().as_deref() != Some("false");
+        let extra_author_emails = db.get_setting("project.extraAuthorEmails").ok().flatten().unwrap_or_default();
+        (project.path, reviewed_hashes, only_my_commits, extra_author_emails)
     };
 
-    let mut commits = git::list_commits(&project_path, 0, limit + 1)?;
+    let author_emails: Vec<String> = if only_my_commits {
+        git::local_user_email(&project_path)
+            .into_iter()
+            .chain(
+                extra_author_emails
+                    .split(',')
+                    .map(|e| e.trim().to_string())
+                    .filter(|e| !e.is_empty()),
+            )
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let mut commits = git::list_commits(&project_path, 0, limit + 1, &author_emails)?;
     let has_more = commits.len() > limit;
     commits.truncate(limit);
 

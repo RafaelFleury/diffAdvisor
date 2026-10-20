@@ -861,6 +861,8 @@ const mockSettings: AppSettings = {
     fileExtensions: '.ts, .tsx, .js, .jsx, .py, .rs',
     ignoredPaths: 'node_modules\n.git\ndist\n__pycache__\n*.log\n.env\n.env.*\ncoverage',
     hasGitignore: true,
+    onlyMyCommits: true,
+    extraAuthorEmails: '',
   },
   ai: {
     endpointUrl: 'https://api.anthropic.com/v1',

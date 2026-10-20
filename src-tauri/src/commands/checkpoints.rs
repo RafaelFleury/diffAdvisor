@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tauri::State;
 
 use crate::db::models::CheckpointResponse;
 use crate::services::ai;
 use crate::state::AppState;
+
+const EVALUATION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,9 +103,9 @@ pub async fn submit_checkpoint(
         (question_text, good_answer_includes)
     };
 
-    let (cr, ai_config) = {
+    let cr = {
         let db = state.db();
-        let cr = db
+        db
             .create_checkpoint_response(
                 debrief_id,
                 &question_id,
@@ -110,25 +113,20 @@ pub async fn submit_checkpoint(
                 &answer,
                 &mode,
             )
-            .map_err(|e| format!("Failed to create checkpoint response: {}", e))?;
-
-        let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
-        let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
-        let api_key = crate::services::secrets::load_api_key(&db);
-        let output_cap = db.get_setting("ai.requiresOutputCap").ok().flatten();
-        let ai_config = ai::AiConfig {
-            endpoint_url: endpoint,
-            model,
-            api_key,
-            requires_output_cap: output_cap,
-        };
-
-        (cr, ai_config)
+            .map_err(|e| format!("Failed to create checkpoint response: {}", e))?
     }; // db guard dropped here
 
     if mode == "free_text" && !resolved_good_answer.is_empty() {
+        let llm_config =
+            match super::llm::load_llm_config(&state, None, Vec::new(), EVALUATION_TIMEOUT).await {
+                Ok(config) => config,
+                Err(e) => {
+                    eprintln!("Checkpoint evaluation skipped: {}", e);
+                    return Ok(checkpoint_to_dto(&cr));
+                }
+            };
         match ai::evaluate_checkpoint(
-            &ai_config,
+            &llm_config,
             &resolved_question_text,
             &resolved_good_answer,
             &answer,

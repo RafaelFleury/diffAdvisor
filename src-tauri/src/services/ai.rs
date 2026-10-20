@@ -1,12 +1,35 @@
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+use super::opencode::{self, OpencodeConfig};
+
 #[derive(Debug, Clone)]
 pub struct AiConfig {
     pub endpoint_url: String,
     pub model: String,
     pub api_key: String,
     pub requires_output_cap: Option<String>,
+}
+
+/// Where completions are sent: an OpenAI-compatible HTTP endpoint (legacy),
+/// or the opencode CLI, which can explore the repository on its own.
+#[derive(Debug, Clone)]
+pub enum LlmConfig {
+    Api(AiConfig),
+    Opencode(OpencodeConfig),
+}
+
+impl LlmConfig {
+    pub fn is_agentic(&self) -> bool {
+        matches!(self, LlmConfig::Opencode(_))
+    }
+
+    pub fn describe(&self) -> String {
+        match self {
+            LlmConfig::Api(c) => format!("api endpoint={} model={}", c.endpoint_url, c.model),
+            LlmConfig::Opencode(c) => format!("opencode model={}", c.model),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +46,8 @@ pub enum AiError {
     ParseError(String),
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
+    #[error("Cancelled")]
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,7 +160,7 @@ pub const RAW_DEBRIEF_REPAIR_RESPONSE_START: &str = "__RAW_DEBRIEF_REPAIR_RESPON
 pub const RAW_DEBRIEF_REPAIR_RESPONSE_END: &str = "__RAW_DEBRIEF_REPAIR_RESPONSE_END__";
 
 pub async fn run_debrief(
-    config: &AiConfig,
+    config: &LlmConfig,
     system_message: &str,
     user_message: &str,
 ) -> Result<DebriefResult, AiError> {
@@ -193,7 +218,7 @@ pub async fn run_debrief(
 }
 
 pub async fn evaluate_checkpoint(
-    config: &AiConfig,
+    config: &LlmConfig,
     question: &str,
     good_answer_includes: &str,
     user_answer: &str,
@@ -211,7 +236,7 @@ pub async fn evaluate_checkpoint(
 }
 
 pub async fn generate_kb_note(
-    config: &AiConfig,
+    config: &LlmConfig,
     note_input: &KbNoteInput,
 ) -> Result<KbNoteResponse, AiError> {
     let system = r#"You are generating an Obsidian-compatible knowledge base note. The note should:
@@ -321,7 +346,7 @@ fn normalize_heading_depth(line: &str) -> Option<String> {
     Some(format!("{}## {}", indent, rest))
 }
 
-pub async fn test_connection(config: &AiConfig) -> Result<bool, AiError> {
+pub async fn test_connection(config: &LlmConfig) -> Result<bool, AiError> {
     let system = "Respond with exactly: {\"status\": \"ok\"}";
     let user = "Test connection. Respond with JSON only.";
 
@@ -330,6 +355,32 @@ pub async fn test_connection(config: &AiConfig) -> Result<bool, AiError> {
 }
 
 async fn call_chat_completion(
+    config: &LlmConfig,
+    system: &str,
+    user: &str,
+    temperature: f32,
+    timeout: Duration,
+) -> Result<CompletionResult, AiError> {
+    match config {
+        LlmConfig::Api(api) => call_api(api, system, user, temperature, timeout).await,
+        LlmConfig::Opencode(oc) => {
+            let prompt = format!("{}\n\n---\n\n{}", system, user);
+            let content = opencode::run(oc, &prompt).await.map_err(|e| {
+                if e == "Cancelled" {
+                    AiError::Cancelled
+                } else {
+                    AiError::ServerError(e)
+                }
+            })?;
+            Ok(CompletionResult {
+                content,
+                discovered_output_cap: None,
+            })
+        }
+    }
+}
+
+async fn call_api(
     config: &AiConfig,
     system: &str,
     user: &str,
@@ -507,7 +558,7 @@ async fn call_chat_completion(
     })
 }
 
-async fn repair_debrief_json(config: &AiConfig, raw_response: &str) -> Result<CompletionResult, AiError> {
+async fn repair_debrief_json(config: &LlmConfig, raw_response: &str) -> Result<CompletionResult, AiError> {
     let system = r#"You repair malformed AI output into valid JSON.
 Return ONLY a valid JSON object (no markdown, no code fences, no commentary).
 Use this schema and keys exactly:

@@ -1,10 +1,23 @@
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
-use tauri::State;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::db::models::{Debrief, Gap};
 use crate::services::{ai, context, git, skills};
 use crate::state::AppState;
+
+use super::llm;
+
+const DEBRIEF_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DebriefProgressEvent {
+    commit_hash: String,
+    message: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -261,6 +274,7 @@ pub async fn get_debrief_by_commit(
 
 #[tauri::command]
 pub async fn run_debrief(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     project_id: i64,
     commit_hash: String,
@@ -304,12 +318,8 @@ pub async fn run_debrief(
     );
 
     // 3. Get settings
-    let (ai_config, analysis_depth, checkpoint_mode, ignored_paths_str, context_window) = {
+    let (analysis_depth, checkpoint_mode, ignored_paths_str, context_window) = {
         let db = state.db();
-        let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
-        let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
-        let api_key = crate::services::secrets::load_api_key(&db);
-        let output_cap = db.get_setting("ai.requiresOutputCap").ok().flatten();
         let depth = db.get_setting("analysis.analysisDepth").ok().flatten().unwrap_or_else(|| "balanced".to_string());
         let mode = db.get_setting("analysis.checkpointMode").ok().flatten().unwrap_or_else(|| "free_text".to_string());
         let ignored = db.get_setting("project.ignoredPaths").ok().flatten().unwrap_or_default();
@@ -320,30 +330,36 @@ pub async fn run_debrief(
             .and_then(|v| v.trim().parse::<usize>().ok())
             .unwrap_or(128_000);
 
-        (
-            ai::AiConfig {
-                endpoint_url: endpoint,
-                model,
-                api_key,
-                requires_output_cap: output_cap,
-            },
-            depth,
-            mode,
-            ignored,
-            context_window,
-        )
+        (depth, mode, ignored, context_window)
     };
+
+    let diffs_dir = llm::opencode_dir("diffs")?;
+    let mut llm_config = llm::load_llm_config(
+        &state,
+        Some(Path::new(&project_path)),
+        vec![diffs_dir.clone()],
+        DEBRIEF_TIMEOUT,
+    )
+    .await?;
+    if let ai::LlmConfig::Opencode(ref mut oc) = llm_config {
+        let handle = app_handle.clone();
+        let hash = commit_hash.clone();
+        oc.progress = Some(Arc::new(move |message: &str| {
+            let _ = handle.emit(
+                "debrief_progress",
+                DebriefProgressEvent {
+                    commit_hash: hash.clone(),
+                    message: message.to_string(),
+                },
+            );
+        }));
+    }
     eprintln!(
-        "[debrief] settings loaded endpoint={} model={} analysis_depth={} checkpoint_mode={}",
-        ai_config.endpoint_url,
-        ai_config.model,
+        "[debrief] settings loaded llm={} analysis_depth={} checkpoint_mode={}",
+        llm_config.describe(),
         analysis_depth,
         checkpoint_mode
     );
-
-    if ai_config.endpoint_url.is_empty() || ai_config.model.is_empty() {
-        return Err("AI endpoint URL and model must be configured in Settings".to_string());
-    }
 
     // 4. Get commit diff
     let diff_step_start = Instant::now();
@@ -433,14 +449,28 @@ pub async fn run_debrief(
     );
 
     let system_tokens = context::estimate_tokens(&system_message, false);
-    let (user_message, reduction_log) = context::assemble_user_message(
-        &project_structure,
-        &commit_info,
-        &history,
-        &diff,
-        system_tokens,
-        input_budget,
-    );
+    // Agentic backends read the diff from a file and explore the repo themselves;
+    // the API path still needs everything inlined and trimmed to the budget.
+    let diff_file = diffs_dir.join(format!("{}.diff", commit_hash));
+    let (user_message, reduction_log) = if llm_config.is_agentic() {
+        std::fs::write(&diff_file, &diff).map_err(|e| format!("Failed to write diff file: {}", e))?;
+        let message = context::assemble_agentic_user_message(
+            &commit_info,
+            &changed_files,
+            &history,
+            &diff_file.to_string_lossy(),
+        );
+        (message, Vec::new())
+    } else {
+        context::assemble_user_message(
+            &project_structure,
+            &commit_info,
+            &history,
+            &diff,
+            system_tokens,
+            input_budget,
+        )
+    };
     eprintln!(
         "[debrief] prompt context assembled system_tokens={} user_chars={} history_items={} reductions={}",
         system_tokens,
@@ -452,10 +482,13 @@ pub async fn run_debrief(
     // 7. Call AI
     let llm_step_start = Instant::now();
     eprintln!(
-        "[debrief] calling LLM endpoint={} model={} commit_hash={}",
-        ai_config.endpoint_url, ai_config.model, commit_hash
+        "[debrief] calling LLM {} commit_hash={}",
+        llm_config.describe(),
+        commit_hash
     );
-    let debrief_result = match ai::run_debrief(&ai_config, &system_message, &user_message).await {
+    let debrief_outcome = ai::run_debrief(&llm_config, &system_message, &user_message).await;
+    let _ = std::fs::remove_file(&diff_file);
+    let debrief_result = match debrief_outcome {
         Ok(result) => {
             eprintln!(
                 "[debrief] LLM response received elapsed_ms={}",

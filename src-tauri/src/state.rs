@@ -1,11 +1,14 @@
 use std::sync::{Arc, Mutex};
 
+use tokio::sync::Notify;
+
 use crate::db::Database;
 use notify::RecommendedWatcher;
 
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,
     pub watcher: Mutex<Option<RecommendedWatcher>>,
+    pub ai_cancel: Arc<Notify>,
 }
 
 impl AppState {
@@ -13,6 +16,7 @@ impl AppState {
         Self {
             db: Arc::new(Mutex::new(db)),
             watcher: Mutex::new(None),
+            ai_cancel: Arc::new(Notify::new()),
         }
     }
 

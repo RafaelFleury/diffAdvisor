@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type {
   Project,
   Commit,
@@ -10,6 +11,8 @@ import type {
   KnowledgeNote,
   Skill,
   AppSettings,
+  OpencodeStatus,
+  OpencodeModel,
 } from '@/types/index.ts'
 import type {
   IProjectService,
@@ -75,6 +78,16 @@ export class TauriDebriefService implements IDebriefService {
       elapsedMs: Math.round(performance.now() - startedAt),
     })
     return result
+  }
+
+  onDebriefProgress(commitHash: string, callback: (message: string) => void): Promise<() => void> {
+    return listen<{ commitHash: string; message: string }>('debrief_progress', (event) => {
+      if (event.payload.commitHash === commitHash) callback(event.payload.message)
+    })
+  }
+
+  cancelDebrief(): Promise<void> {
+    return invoke('cancel_ai_run')
   }
 
   markReviewed(debriefId: string): Promise<void> {
@@ -188,5 +201,13 @@ export class TauriSettingsService implements ISettingsService {
 
   testConnection(): Promise<{ success: boolean; message: string }> {
     return invoke<{ success: boolean; message: string }>('test_connection')
+  }
+
+  getOpencodeStatus(): Promise<OpencodeStatus> {
+    return invoke<OpencodeStatus>('get_opencode_status')
+  }
+
+  listOpencodeModels(): Promise<OpencodeModel[]> {
+    return invoke<OpencodeModel[]>('list_opencode_models')
   }
 }

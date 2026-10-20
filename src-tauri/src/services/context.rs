@@ -261,6 +261,66 @@ pub fn assemble_user_message(
     (parts.join("\n"), reduction_log)
 }
 
+/// Review priority tier for a changed file (lower = more important).
+pub fn file_priority(name: &str) -> u8 {
+    let lower = name.to_lowercase();
+    if lower.contains("auth") || lower.contains("security") || lower.contains("crypto") {
+        return 0;
+    }
+    if lower.contains("config") || lower.contains("deploy") || lower.contains("docker") || lower.contains("ci") {
+        return 1;
+    }
+    if lower.contains("api") || lower.contains("route") || lower.contains("endpoint") || lower.contains("controller") {
+        return 2;
+    }
+    if lower.contains("model") || lower.contains("schema") || lower.contains("migration") || lower.contains("db") {
+        return 3;
+    }
+    4
+}
+
+/// User message for agentic backends: instead of inlining the diff, point the
+/// agent at it and at the changed files, and let it explore the repo itself.
+pub fn assemble_agentic_user_message(
+    commit: &CommitInfo,
+    changed_files: &[String],
+    history: &[String],
+    diff_path: &str,
+) -> String {
+    let mut files: Vec<&String> = changed_files.iter().collect();
+    files.sort_by_key(|f| file_priority(f));
+    let file_list: Vec<String> = files.iter().map(|f| format!("- {}", f)).collect();
+
+    let history_section = if history.is_empty() {
+        String::new()
+    } else {
+        format!("\n## Recent History\n{}\n", history.join("\n"))
+    };
+
+    format!(
+        "## Commit\nHash: {hash}\nMessage: {message}\nAuthor: {author}\nDate: {date}\nFiles changed: {files_changed} (+{additions} -{deletions})\n\
+{history_section}\n\
+## Changed Files (most review-relevant first)\n{file_list}\n\n\
+## How to Investigate\n\
+You are running inside the project repository with read-only tools.\n\
+1. Read the full diff at `{diff_path}`. If it is long, read it in chunks using offsets until you have seen all of it.\n\
+2. Read the changed files and whatever surrounds them that you need to judge the change: callers, imported modules, configuration, middleware, tests.\n\
+3. Before reporting a gap, check whether it is already handled elsewhere in the repository (e.g. validation, rate limiting or auth implemented in shared middleware). Only report gaps that are actually missing.\n\
+4. Do not try to modify files or run commands; you only have read access.\n\n\
+When you are done, reply with ONLY the JSON object described in the instructions above, with no other text.\n",
+        hash = commit.hash,
+        message = commit.message,
+        author = commit.author,
+        date = commit.timestamp,
+        files_changed = commit.files_changed,
+        additions = commit.additions,
+        deletions = commit.deletions,
+        history_section = history_section,
+        file_list = file_list.join("\n"),
+        diff_path = diff_path,
+    )
+}
+
 pub fn truncate_diff_smart(diff: &str, token_budget: usize) -> (String, Vec<String>) {
     let mut log = Vec::new();
 
@@ -277,24 +337,6 @@ pub fn truncate_diff_smart(diff: &str, token_budget: usize) -> (String, Vec<Stri
     let file_chunks: Vec<&str> = diff.split("diff --git ").collect();
     let mut kept_chunks: Vec<String> = Vec::new();
     let mut current_tokens: usize = 0;
-
-    // Priority tiers for file ordering
-    fn file_priority(name: &str) -> u8 {
-        let lower = name.to_lowercase();
-        if lower.contains("auth") || lower.contains("security") || lower.contains("crypto") {
-            return 0;
-        }
-        if lower.contains("config") || lower.contains("deploy") || lower.contains("docker") || lower.contains("ci") {
-            return 1;
-        }
-        if lower.contains("api") || lower.contains("route") || lower.contains("endpoint") || lower.contains("controller") {
-            return 2;
-        }
-        if lower.contains("model") || lower.contains("schema") || lower.contains("migration") || lower.contains("db") {
-            return 3;
-        }
-        4
-    }
 
     let mut prioritized: Vec<(u8, &str)> = Vec::new();
     for chunk in file_chunks.iter().skip(1) {
@@ -357,4 +399,30 @@ pub fn truncate_diff_smart(diff: &str, token_budget: usize) -> (String, Vec<Stri
     }
 
     (kept_chunks.join("\n"), log)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agentic_message_points_to_diff_and_orders_files_by_priority() {
+        let commit = CommitInfo {
+            hash: "abc123".to_string(),
+            message: "add login".to_string(),
+            author: "Dev".to_string(),
+            timestamp: "2026-10-20".to_string(),
+            files_changed: 2,
+            additions: 10,
+            deletions: 1,
+        };
+        let files = vec!["src/README.md".to_string(), "src/auth/login.ts".to_string()];
+        let message = assemble_agentic_user_message(&commit, &files, &[], "/tmp/abc123.diff");
+
+        assert!(message.contains("`/tmp/abc123.diff`"));
+        let auth = message.find("src/auth/login.ts").unwrap();
+        let readme = message.find("src/README.md").unwrap();
+        assert!(auth < readme);
+        assert!(!message.contains("## Recent History"));
+    }
 }

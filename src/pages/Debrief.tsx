@@ -5,6 +5,7 @@ import { knowledgeService } from '@/services/index.ts'
 import DiffViewer from '@/components/features/debrief/DiffViewer.tsx'
 import DebriefPanel from '@/components/features/debrief/DebriefPanel.tsx'
 import ResizablePanel from '@/components/features/debrief/ResizablePanel.tsx'
+import DebriefProgress from '@/components/features/debrief/DebriefProgress.tsx'
 import toast from 'react-hot-toast'
 
 export default function Debrief() {
@@ -14,6 +15,7 @@ export default function Debrief() {
     currentDebrief,
     diffFiles,
     debriefLoading,
+    debriefProgress,
     error,
     rawDebriefText,
     answers,
@@ -21,6 +23,7 @@ export default function Debrief() {
     markReviewed,
     submitAnswer,
     clearDebrief,
+    cancelDebrief,
   } = useDebriefStore()
   const [savingToKb, setSavingToKb] = useState(false)
   const isAlreadyReviewed = currentDebrief?.status === 'reviewed'
@@ -99,21 +102,11 @@ export default function Debrief() {
     )
   }
 
+  const progress = <DebriefProgress steps={debriefProgress} onCancel={() => void cancelDebrief()} />
+
   if (debriefLoading && !currentDebrief && !rawDebriefText && diffFiles.length === 0) {
     return (
-      <div
-        className="font-mono"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100%',
-          fontSize: 13,
-          color: 'var(--text-tertiary)',
-        }}
-      >
-        Analyzing commit...
-      </div>
+      <div style={{ maxWidth: 560, margin: '0 auto', paddingTop: '20vh' }}>{progress}</div>
     )
   }
 
@@ -220,6 +213,8 @@ export default function Debrief() {
               answers={answers}
               onSubmitAnswer={handleSubmitAnswer}
             />
+          ) : debriefLoading ? (
+            progress
           ) : rawDebriefText ? (
             <div style={{ height: '100%', overflow: 'auto' }}>
               <pre

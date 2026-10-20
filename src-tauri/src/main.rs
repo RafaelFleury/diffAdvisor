@@ -69,6 +69,9 @@ fn main() {
             commands::settings::toggle_skill,
             commands::settings::add_skill,
             commands::settings::test_connection,
+            commands::llm::get_opencode_status,
+            commands::llm::list_opencode_models,
+            commands::llm::cancel_ai_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -9,6 +9,8 @@ import type {
   KnowledgeNote,
   Skill,
   AppSettings,
+  OpencodeStatus,
+  OpencodeModel,
 } from '@/types/index.ts'
 import type {
   IProjectService,
@@ -865,6 +867,8 @@ const mockSettings: AppSettings = {
     extraAuthorEmails: '',
   },
   ai: {
+    provider: 'opencode',
+    opencodeModel: 'opencode/big-pickle',
     endpointUrl: 'https://api.anthropic.com/v1',
     model: 'Claude Sonnet 4',
     apiKey: 'sk-ant-••••••••••••••••',
@@ -960,6 +964,14 @@ export class MockDebriefService implements IDebriefService {
     }
     return debrief
   }
+
+  async onDebriefProgress(_commitHash: string, callback: (message: string) => void): Promise<() => void> {
+    const steps = ['Reading the commit diff', 'Reading src/routes/auth.ts', 'Searching for "rateLimit"']
+    const timers = steps.map((step, i) => setTimeout(() => callback(step), 150 * (i + 1)))
+    return () => timers.forEach(clearTimeout)
+  }
+
+  async cancelDebrief(): Promise<void> {}
 
   async markReviewed(debriefId: string): Promise<void> {
     await delay()
@@ -1128,9 +1140,22 @@ export class MockSettingsService implements ISettingsService {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     await delay(800)
-    if (settings.ai.apiKey && settings.ai.apiKey.length > 5) {
+    if (settings.ai.provider === 'opencode' || (settings.ai.apiKey && settings.ai.apiKey.length > 5)) {
       return { success: true, message: 'Connection successful! Model responded.' }
     }
     return { success: false, message: 'Connection refused: invalid API key.' }
+  }
+
+  async getOpencodeStatus(): Promise<OpencodeStatus> {
+    await delay()
+    return { installed: true, path: '/usr/local/bin/opencode', version: '1.19.3' }
+  }
+
+  async listOpencodeModels(): Promise<OpencodeModel[]> {
+    await delay()
+    return [
+      { id: 'opencode/big-pickle', name: 'Big Pickle', contextWindow: 200000 },
+      { id: 'opencode/beam-free', name: 'Beam Free', contextWindow: 1048576 },
+    ]
   }
 }

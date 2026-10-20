@@ -74,6 +74,8 @@ interface DebriefState {
   gapCount: number
   loading: boolean
   debriefLoading: boolean
+  /** What the AI agent has done so far in the running debrief (opencode only). */
+  debriefProgress: string[]
   error: string | null
   rawDebriefText: string | null
   answers: Record<string, { text: string; evaluation: Evaluation | null }>
@@ -84,6 +86,7 @@ interface DebriefState {
   markReviewed: (debriefId: string) => Promise<void>
   submitAnswer: (debriefId: string, questionId: string, answer: string) => Promise<Evaluation>
   clearDebrief: () => void
+  cancelDebrief: () => Promise<void>
 }
 
 export const useDebriefStore = create<DebriefState>((set, get) => ({
@@ -97,6 +100,7 @@ export const useDebriefStore = create<DebriefState>((set, get) => ({
   gapCount: 0,
   loading: false,
   debriefLoading: false,
+  debriefProgress: [],
   error: null,
   rawDebriefText: null,
   answers: {},
@@ -150,10 +154,17 @@ export const useDebriefStore = create<DebriefState>((set, get) => ({
         currentDebrief: null,
         diffFiles: [],
         debriefLoading: true,
+        debriefProgress: [],
         error: null,
         rawDebriefText: null,
         answers: {},
       })
+
+      const unsubscribeProgress = await debriefService
+        .onDebriefProgress(commitHash, (message) =>
+          set((state) => ({ debriefProgress: [...state.debriefProgress, message] })),
+        )
+        .catch(() => () => {})
 
       const debriefRequestStart = performance.now()
       console.info('[debrief] requesting debrief analysis', { commitHash })
@@ -181,6 +192,7 @@ export const useDebriefStore = create<DebriefState>((set, get) => ({
       })
 
       const [debriefResult, diffResult] = await Promise.allSettled([debriefPromise, diffPromise])
+      unsubscribeProgress()
 
       const getErrorMessage = (reason: unknown) =>
         reason instanceof Error ? reason.message : String(reason)
@@ -283,5 +295,14 @@ export const useDebriefStore = create<DebriefState>((set, get) => ({
     return evaluation
   },
 
-  clearDebrief: () => set({ currentDebrief: null, diffFiles: [], rawDebriefText: null, answers: {} }),
+  clearDebrief: () =>
+    set({ currentDebrief: null, diffFiles: [], rawDebriefText: null, answers: {}, debriefProgress: [] }),
+
+  cancelDebrief: async () => {
+    try {
+      await debriefService.cancelDebrief()
+    } catch (e) {
+      set({ error: (e as Error).message })
+    }
+  },
 }))

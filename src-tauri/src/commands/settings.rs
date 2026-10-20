@@ -205,21 +205,19 @@ pub async fn add_skill(
 
 #[tauri::command]
 pub async fn test_connection(state: State<'_, AppState>) -> Result<ConnectionResultDto, String> {
-    let ai_config = {
-        let db = state.db();
-        let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
-        let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
-        let api_key = crate::services::secrets::load_api_key(&db);
-        let output_cap = db.get_setting("ai.requiresOutputCap").ok().flatten();
-        ai::AiConfig {
-            endpoint_url: endpoint,
-            model,
-            api_key,
-            requires_output_cap: output_cap,
-        }
+    let llm_config = match super::llm::load_llm_config(
+        &state,
+        None,
+        Vec::new(),
+        std::time::Duration::from_secs(2 * 60),
+    )
+    .await
+    {
+        Ok(config) => config,
+        Err(message) => return Ok(ConnectionResultDto { success: false, message }),
     };
 
-    match ai::test_connection(&ai_config).await {
+    match ai::test_connection(&llm_config).await {
         Ok(_) => Ok(ConnectionResultDto {
             success: true,
             message: "Connection successful".to_string(),

@@ -145,6 +145,8 @@ fn seed_default_settings(conn: &Connection) -> DbResult<()> {
         ("project.hasGitignore", "false"),
         ("project.onlyMyCommits", "true"),
         ("project.extraAuthorEmails", ""),
+        ("ai.provider", "opencode"),
+        ("ai.opencodeModel", ""),
         ("ai.endpointUrl", "https://api.openai.com/v1"),
         ("ai.model", "gpt-4.1"),
         ("ai.apiKey", ""),

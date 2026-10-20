@@ -9,6 +9,18 @@ AI-powered code review and learning tool built with Tauri 2 (Rust + React/TypeSc
 - **Rust** (stable)
 - **System libraries** (Linux): `libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev libdbus-1-dev patchelf`
 
+## AI Provider
+
+By default diffAdvisor analyzes commits through [opencode](https://opencode.ai), which runs a read-only agent inside your repository: it reads the commit diff, then opens whatever related files it needs (callers, middleware, config) before reporting gaps. Free models work without logging in:
+
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+Pick a model under **Settings → AI Provider**. The agent cannot edit files, run shell commands or fetch URLs.
+
+An OpenAI-compatible endpoint with an API key is still available as the legacy provider; in that mode the diff is sent inline and trimmed to the configured context window.
+
 ## Setup
 
 ```bash
@@ -80,6 +92,13 @@ Rust (database layer and services, without the Tauri runtime):
 ```bash
 cd src-tauri
 cargo test --no-default-features
+```
+
+End-to-end debrief through a real opencode install (needs network):
+
+```bash
+cd src-tauri
+cargo test --no-default-features --test opencode_e2e -- --ignored --nocapture
 ```
 
 Frontend:

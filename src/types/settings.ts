@@ -1,6 +1,7 @@
 export type Theme = 'dark' | 'light'
 export type AnalysisDepth = 'quick' | 'balanced' | 'deep'
 export type DebriefLanguage = 'english' | 'portuguese' | 'auto'
+export type AIProvider = 'opencode' | 'api'
 
 export interface ProjectSettings {
   monitoredDirectory: string
@@ -12,11 +13,25 @@ export interface ProjectSettings {
 }
 
 export interface AISettings {
+  provider: AIProvider
+  opencodeModel: string
   endpointUrl: string
   model: string
   apiKey: string
   contextWindow: string
   webSearch: boolean
+}
+
+export interface OpencodeStatus {
+  installed: boolean
+  path: string | null
+  version: string | null
+}
+
+export interface OpencodeModel {
+  id: string
+  name: string
+  contextWindow: number
 }
 
 export interface AnalysisSettings {

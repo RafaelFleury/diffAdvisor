@@ -9,6 +9,8 @@ import type {
   KnowledgeNote,
   Skill,
   AppSettings,
+  OpencodeStatus,
+  OpencodeModel,
 } from '@/types/index.ts'
 
 export interface IProjectService {
@@ -24,6 +26,9 @@ export interface IDebriefService {
   getReviewedCommits(projectId: string): Promise<Commit[]>
   getDebriefByCommit(commitHash: string): Promise<DebriefResult | null>
   runDebrief(commitHash: string): Promise<DebriefResult>
+  /** Streams what the AI agent is doing while a debrief runs. Resolves to an unsubscribe function. */
+  onDebriefProgress(commitHash: string, callback: (message: string) => void): Promise<() => void>
+  cancelDebrief(): Promise<void>
   markReviewed(debriefId: string): Promise<void>
   getDiffContent(commitHash: string): Promise<FileDiff[]>
   getGapCount(projectId: string): Promise<number>
@@ -54,4 +59,6 @@ export interface ISettingsService {
   toggleSkill(skillId: string, enabled: boolean): Promise<void>
   addSkill(skill: Omit<Skill, 'id' | 'autoDetected' | 'builtIn'>): Promise<Skill>
   testConnection(): Promise<{ success: boolean; message: string }>
+  getOpencodeStatus(): Promise<OpencodeStatus>
+  listOpencodeModels(): Promise<OpencodeModel[]>
 }

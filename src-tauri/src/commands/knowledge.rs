@@ -260,19 +260,13 @@ pub async fn write_to_kb(
 
     // 2. Get settings
     let kb_path = sync_kb_index(state.inner())?;
-    let ai_config = {
-        let db = state.db();
-        let endpoint = db.get_setting("ai.endpointUrl").ok().flatten().unwrap_or_default();
-        let model = db.get_setting("ai.model").ok().flatten().unwrap_or_default();
-        let api_key = crate::services::secrets::load_api_key(&db);
-        let output_cap = db.get_setting("ai.requiresOutputCap").ok().flatten();
-        ai::AiConfig {
-            endpoint_url: endpoint,
-            model,
-            api_key,
-            requires_output_cap: output_cap,
-        }
-    };
+    let ai_config = super::llm::load_llm_config(
+        state.inner(),
+        None,
+        Vec::new(),
+        std::time::Duration::from_secs(5 * 60),
+    )
+    .await?;
 
     // 3. Get existing KB notes catalog
     let existing_kb_notes = kb_service::list_existing_note_titles(&kb_path);

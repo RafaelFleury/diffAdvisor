@@ -33,6 +33,13 @@ describe('debriefStore', () => {
     expect(state.loading).toBe(false)
   })
 
+  it('collects agent progress while a debrief runs', async () => {
+    await useDebriefStore.getState().loadDebrief('a3f7c2d')
+    const state = useDebriefStore.getState()
+    expect(state.debriefProgress.length).toBeGreaterThan(0)
+    expect(state.debriefLoading).toBe(false)
+  })
+
   it('loads debrief for commit', async () => {
     await useDebriefStore.getState().loadDebrief('a3f7c2d')
     const state = useDebriefStore.getState()

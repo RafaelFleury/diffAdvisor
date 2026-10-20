@@ -3,6 +3,7 @@ pub mod ai;
 pub mod context;
 pub mod skills;
 pub mod knowledge;
+pub mod opencode;
 pub mod secrets;
 #[cfg(feature = "tauri-app")]
 pub mod watcher;

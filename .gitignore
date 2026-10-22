@@ -27,8 +27,11 @@ dist-ssr
 .env
 .env.*
 
-# Tauri (future)
+# Tauri
 src-tauri/target
+
+# Claude Code (personal settings)
+.claude/settings.local.json
 
 # Coverage
 coverage

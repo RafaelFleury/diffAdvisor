@@ -95,6 +95,26 @@ impl Database {
         Ok(notes)
     }
 
+    /// All notes with their indexed body text (empty if not indexed yet),
+    /// most recently modified files first.
+    pub fn list_knowledge_notes_with_content(&self) -> DbResult<Vec<(KnowledgeNote, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT kn.id, kn.project_id, kn.title, kn.category_path, kn.file_path, kn.auto_generated, kn.tags, kn.source_debrief_id, kn.source_commit, kn.links_to, kn.created_at, kn.updated_at, COALESCE(f.content, '')
+             FROM knowledge_notes kn
+             LEFT JOIN knowledge_notes_fts f ON f.rowid = kn.id
+             ORDER BY kn.file_mtime DESC, kn.updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((Self::row_to_knowledge_note(row), row.get::<_, String>(12)?))
+        })?;
+        let mut notes = Vec::new();
+        for row in rows {
+            notes.push(row?);
+        }
+        Ok(notes)
+    }
+
     pub fn search_knowledge_notes(&self, query: &str) -> DbResult<Vec<KnowledgeNote>> {
         let conn = self.conn();
         let pattern = format!("%{}%", query);
@@ -260,6 +280,21 @@ mod tests {
         let redis = db.search_note_index("\"redis\"", 10).unwrap();
         assert_eq!(redis.len(), 1);
         assert_eq!(db.get_note_file_mtime(redis[0].0.id).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_list_with_content_orders_by_file_mtime() {
+        let db = setup();
+        let old = indexed_note(&db, "Old", "old body");
+        let new = indexed_note(&db, "New", "new body");
+        db.index_note_content(old.id, "Old", &[], "security", "old body", 10).unwrap();
+        db.index_note_content(new.id, "New", &[], "security", "new body", 20).unwrap();
+        db.create_knowledge_note(None, "Unindexed", "", "/kb/u.md", false, &[], None, None, &[])
+            .unwrap();
+
+        let listed = db.list_knowledge_notes_with_content().unwrap();
+        let summary: Vec<(&str, &str)> = listed.iter().map(|(n, c)| (n.title.as_str(), c.as_str())).collect();
+        assert_eq!(summary, [("New", "new body"), ("Old", "old body"), ("Unindexed", "")]);
     }
 
     #[test]

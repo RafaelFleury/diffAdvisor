@@ -374,6 +374,23 @@ pub fn fts_user_query(input: &str) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" "))
 }
 
+/// Which items to send in full, in order, so their total size stays within
+/// `budget`. Items that don't fit are skipped, but smaller ones after them
+/// can still be included.
+pub fn select_within_budget(sizes: &[usize], budget: usize) -> Vec<bool> {
+    let mut remaining = budget;
+    sizes
+        .iter()
+        .map(|&size| {
+            let fits = size <= remaining;
+            if fits {
+                remaining -= size;
+            }
+            fits
+        })
+        .collect()
+}
+
 pub struct RelatedNote {
     pub title: String,
     pub category_path: String,
@@ -473,6 +490,13 @@ mod tests {
         );
         assert_eq!(fts_user_query("rate lim").as_deref(), Some("\"rate\"* \"lim\"*"));
         assert_eq!(fts_user_query("  ").as_deref(), None);
+    }
+
+    #[test]
+    fn test_select_within_budget_skips_what_does_not_fit() {
+        assert_eq!(select_within_budget(&[40, 50, 20, 5], 70), [true, false, true, true]);
+        assert_eq!(select_within_budget(&[0, 10], 0), [true, false]);
+        assert!(select_within_budget(&[], 10).is_empty());
     }
 
     #[test]

@@ -15,62 +15,85 @@ interface KnowledgeState {
   saveNote: (note: Partial<KnowledgeNote> & { title: string; content: string; categoryPath: string }) => Promise<KnowledgeNote>
 }
 
-export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
-  notes: [],
-  currentNote: null,
-  searchQuery: '',
-  filteredNotes: [],
-  loading: false,
-  error: null,
+const needsContent = (note: KnowledgeNote | null): note is KnowledgeNote =>
+  note !== null && note.contentLoaded === false
 
-  loadNotes: async () => {
-    set({ loading: true, error: null })
+export const useKnowledgeStore = create<KnowledgeState>((set, get) => {
+  /** Fetches a note whose content was left out of the listing and caches it. */
+  const loadFullNote = async (noteId: string) => {
     try {
-      const notes = await knowledgeService.getNotes()
-      const currentNote = get().currentNote
-      const nextCurrentNote = currentNote
-        ? notes.find((note) => note.id === currentNote.id) ?? notes[0] ?? null
-        : notes.find((note) => note.id === 'note-1') ?? notes[0] ?? null
-      set({ notes, filteredNotes: notes, currentNote: nextCurrentNote, loading: false })
+      const full = await knowledgeService.getNote(noteId)
+      if (!full) return
+      const replace = (list: KnowledgeNote[]) => list.map((n) => (n.id === full.id ? full : n))
+      set((state) => ({
+        notes: replace(state.notes),
+        filteredNotes: replace(state.filteredNotes),
+        currentNote: state.currentNote?.id === full.id ? full : state.currentNote,
+      }))
     } catch (e) {
-      set({ error: (e as Error).message, loading: false })
+      set({ error: (e as Error).message })
     }
-  },
+  }
 
-  selectNote: async (noteId) => {
-    const note = get().notes.find((n) => n.id === noteId) ?? null
-    if (note) {
-      set({ currentNote: note })
-    } else {
+  return {
+    notes: [],
+    currentNote: null,
+    searchQuery: '',
+    filteredNotes: [],
+    loading: false,
+    error: null,
+
+    loadNotes: async () => {
+      set({ loading: true, error: null })
       try {
-        const fetched = await knowledgeService.getNote(noteId)
-        set({ currentNote: fetched })
+        const notes = await knowledgeService.getNotes()
+        const currentNote = get().currentNote
+        const nextCurrentNote = currentNote
+          ? notes.find((note) => note.id === currentNote.id) ?? notes[0] ?? null
+          : notes.find((note) => note.id === 'note-1') ?? notes[0] ?? null
+        set({ notes, filteredNotes: notes, currentNote: nextCurrentNote, loading: false })
+        if (needsContent(nextCurrentNote)) await loadFullNote(nextCurrentNote.id)
+      } catch (e) {
+        set({ error: (e as Error).message, loading: false })
+      }
+    },
+
+    selectNote: async (noteId) => {
+      const note = get().notes.find((n) => n.id === noteId) ?? null
+      if (note) {
+        set({ currentNote: note })
+        if (needsContent(note)) await loadFullNote(note.id)
+      } else {
+        try {
+          const fetched = await knowledgeService.getNote(noteId)
+          set({ currentNote: fetched })
+        } catch (e) {
+          set({ error: (e as Error).message })
+        }
+      }
+    },
+
+    setSearchQuery: async (query) => {
+      set({ searchQuery: query })
+      try {
+        const filteredNotes = await knowledgeService.searchNotes(query)
+        // Results for an older query can arrive after newer ones while typing.
+        if (get().searchQuery === query) set({ filteredNotes })
       } catch (e) {
         set({ error: (e as Error).message })
       }
-    }
-  },
+    },
 
-  setSearchQuery: async (query) => {
-    set({ searchQuery: query })
-    try {
-      const filteredNotes = await knowledgeService.searchNotes(query)
-      // Results for an older query can arrive after newer ones while typing.
-      if (get().searchQuery === query) set({ filteredNotes })
-    } catch (e) {
-      set({ error: (e as Error).message })
-    }
-  },
-
-  saveNote: async (note) => {
-    try {
-      const saved = await knowledgeService.saveNote(note)
-      const notes = await knowledgeService.getNotes()
-      set({ notes, filteredNotes: notes, currentNote: saved })
-      return saved
-    } catch (e) {
-      set({ error: (e as Error).message })
-      throw e
-    }
-  },
-}))
+    saveNote: async (note) => {
+      try {
+        const saved = await knowledgeService.saveNote(note)
+        const notes = await knowledgeService.getNotes()
+        set({ notes, filteredNotes: notes, currentNote: saved })
+        return saved
+      } catch (e) {
+        set({ error: (e as Error).message })
+        throw e
+      }
+    },
+  }
+})

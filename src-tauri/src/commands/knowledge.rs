@@ -23,25 +23,49 @@ pub struct KnowledgeNoteDto {
     pub category_path: String,
     pub file_path: String,
     pub content: String,
+    /// False when `content` was left out of a listing to stay within the
+    /// size budget; fetch the note by id to get it.
+    pub content_loaded: bool,
     pub auto_generated: bool,
     pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
+/// Total note content (in characters) a listing sends; notes beyond it come
+/// with `content_loaded: false`.
+const LISTING_CONTENT_BUDGET_CHARS: usize = 200_000;
+
+/// Note with its full content, read from disk.
 fn note_to_dto(note: &KnowledgeNote) -> KnowledgeNoteDto {
-    let content = if !note.file_path.is_empty() {
+    let body = if !note.file_path.is_empty() {
         kb_service::read_note(std::path::Path::new(&note.file_path))
             .map(|raw| kb_service::strip_yaml_frontmatter(&raw))
             .unwrap_or_default()
     } else {
         String::new()
     };
+    build_note_dto(note, Some(body))
+}
 
-    let content = if note.auto_generated {
-        ai::normalize_kb_note_markdown(&note.title, &content)
-    } else {
-        content
+/// Notes with their indexed bodies, in order; content is included until the
+/// listing budget runs out.
+fn notes_to_dtos_within_budget(notes: Vec<(KnowledgeNote, String)>) -> Vec<KnowledgeNoteDto> {
+    let sizes: Vec<usize> = notes.iter().map(|(_, body)| body.chars().count()).collect();
+    let include = kb_service::select_within_budget(&sizes, LISTING_CONTENT_BUDGET_CHARS);
+    notes
+        .into_iter()
+        .zip(include)
+        .map(|((note, body), include)| build_note_dto(&note, include.then_some(body)))
+        .collect()
+}
+
+fn build_note_dto(note: &KnowledgeNote, body: Option<String>) -> KnowledgeNoteDto {
+    let content_loaded = body.is_some();
+    let content = match body {
+        Some(body) if note.auto_generated => ai::normalize_kb_note_markdown(&note.title, &body),
+        Some(body) => body,
+        None => String::new(),
     };
 
     KnowledgeNoteDto {
@@ -51,6 +75,7 @@ fn note_to_dto(note: &KnowledgeNote) -> KnowledgeNoteDto {
         category_path: note.category_path.clone(),
         file_path: note.file_path.clone(),
         content,
+        content_loaded,
         auto_generated: note.auto_generated,
         tags: note.tags.clone(),
         created_at: note.created_at.clone(),
@@ -183,23 +208,22 @@ pub(crate) fn find_related_notes(
         .collect()
 }
 
-fn list_visible_notes(state: &AppState) -> Result<Vec<KnowledgeNote>, String> {
+fn list_visible_notes(state: &AppState) -> Result<Vec<(KnowledgeNote, String)>, String> {
     let kb_root = sync_kb_index(state)?;
     let db = state.db();
     let notes = db
-        .list_knowledge_notes()
+        .list_knowledge_notes_with_content()
         .map_err(|e| format!("Failed to list notes: {}", e))?;
 
     Ok(notes
         .into_iter()
-        .filter(|note| note_is_visible_in_root(note, &kb_root))
+        .filter(|(note, _)| note_is_visible_in_root(note, &kb_root))
         .collect())
 }
 
 #[tauri::command]
 pub async fn get_notes(state: State<'_, AppState>) -> Result<Vec<KnowledgeNoteDto>, String> {
-    let notes = list_visible_notes(state.inner())?;
-    Ok(notes.iter().map(note_to_dto).collect())
+    Ok(notes_to_dtos_within_budget(list_visible_notes(state.inner())?))
 }
 
 #[tauri::command]
@@ -291,11 +315,12 @@ pub async fn search_notes(
     let results = db
         .search_note_index(&match_query, 200)
         .map_err(|e| format!("Failed to search notes: {}", e))?;
-    Ok(results
-        .iter()
-        .filter(|(note, _)| note_is_visible_in_root(note, &kb_root))
-        .map(|(note, _)| note_to_dto(note))
-        .collect())
+    Ok(notes_to_dtos_within_budget(
+        results
+            .into_iter()
+            .filter(|(note, _)| note_is_visible_in_root(note, &kb_root))
+            .collect(),
+    ))
 }
 
 #[tauri::command]

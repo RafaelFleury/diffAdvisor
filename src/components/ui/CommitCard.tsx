@@ -40,7 +40,7 @@ export default function CommitCard({ commit, onClick }: CommitCardProps) {
         justifyContent: 'space-between',
         alignItems: 'center',
         cursor: onClick ? 'pointer' : 'default',
-        opacity: isPending ? 1 : 0.7,
+        opacity: isPending ? 1 : 0.85,
         transition: 'all 0.15s ease',
         ...(hovered && !isPending ? { opacity: 1 } : {}),
       }}

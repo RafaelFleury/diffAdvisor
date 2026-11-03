@@ -71,7 +71,7 @@ export default function DiffViewer({ files }: DiffViewerProps) {
             }}
           >
             <span>{file.fileName}</span>
-            <span style={{ fontSize: 10, opacity: 0.7 }}>
+            <span style={{ fontSize: 10, opacity: 0.85 }}>
               <span style={{ color: 'var(--diff-add-text)' }}>+{file.additions}</span>
               {' '}
               <span style={{ color: 'var(--diff-del-text)' }}>-{file.deletions}</span>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Toggle from '@/components/ui/Toggle.tsx'
 import Select from '@/components/ui/Select.tsx'
 import { settingsService } from '@/services/index.ts'
-import type { AgentProvider, AgentStatus, AIProvider, AppSettings, OpencodeModel } from '@/types/index.ts'
+import type { AgentModel, AgentProvider, AgentStatus, AIProvider, AISettings, AppSettings } from '@/types/index.ts'
 
 interface AIProviderSettingsProps {
   settings: AppSettings
@@ -92,12 +92,22 @@ const AGENT_INFO: Record<AgentProvider, { label: string; install: React.ReactNod
   },
 }
 
-const CLAUDE_CODE_MODELS = [
-  { id: 'fable', name: 'Fable (latest)' },
-  { id: 'opus', name: 'Opus (latest)' },
-  { id: 'sonnet', name: 'Sonnet (latest)' },
-  { id: 'haiku', name: 'Haiku (latest)' },
+/** Claude Code accepts the same `--effort` levels for every model alias. */
+const CLAUDE_CODE_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+const CLAUDE_CODE_MODELS: AgentModel[] = [
+  { id: 'fable', name: 'Fable (latest)', contextWindow: 0, reasoningLevels: CLAUDE_CODE_LEVELS },
+  { id: 'opus', name: 'Opus (latest)', contextWindow: 0, reasoningLevels: CLAUDE_CODE_LEVELS },
+  { id: 'sonnet', name: 'Sonnet (latest)', contextWindow: 0, reasoningLevels: CLAUDE_CODE_LEVELS },
+  { id: 'haiku', name: 'Haiku (latest)', contextWindow: 0, reasoningLevels: CLAUDE_CODE_LEVELS },
 ]
+
+/** Which settings hold each agent CLI's model and reasoning effort. */
+const AGENT_FIELDS = {
+  opencode: { model: 'opencodeModel', effort: 'opencodeEffort', defaultModel: 'Automatic (first free model)' },
+  'claude-code': { model: 'claudeCodeModel', effort: 'claudeCodeEffort', defaultModel: "Default (Claude Code's own setting)" },
+  codex: { model: 'codexModel', effort: 'codexEffort', defaultModel: 'Default (from ~/.codex/config.toml)' },
+} as const satisfies Record<AgentProvider, { model: keyof AISettings; effort: keyof AISettings; defaultModel: string }>
 
 const formatContext = (tokens: number) =>
   tokens >= 1_000_000 ? `${(tokens / 1_000_000).toFixed(1)}M` : `${Math.round(tokens / 1000)}k`
@@ -105,7 +115,11 @@ const formatContext = (tokens: number) =>
 export default function AIProviderSettings({ settings, connectionTestResult, onUpdate, onTestConnection }: AIProviderSettingsProps) {
   const [testingConnection, setTestingConnection] = useState(false)
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
-  const [opencodeModels, setOpencodeModels] = useState<OpencodeModel[]>([])
+  const [agentModels, setAgentModels] = useState<AgentModel[]>([])
+  const [codexDefaults, setCodexDefaults] = useState<{ model: string | null; effort: string | null }>({
+    model: null,
+    effort: null,
+  })
   const [agentError, setAgentError] = useState<string | null>(null)
   const [checkingAgent, setCheckingAgent] = useState(false)
   const agentProvider: AgentProvider | null = settings.ai.provider === 'api' ? null : settings.ai.provider
@@ -115,10 +129,20 @@ export default function AIProviderSettings({ settings, connectionTestResult, onU
     setCheckingAgent(true)
     setAgentStatus(null)
     setAgentError(null)
+    setAgentModels([])
     try {
       const status = await settingsService.getAgentStatus(provider)
       setAgentStatus(status)
-      setOpencodeModels(provider === 'opencode' && status.installed ? await settingsService.listOpencodeModels() : [])
+      if (!status.installed) return
+      if (provider === 'opencode') {
+        setAgentModels(await settingsService.listOpencodeModels())
+      } else if (provider === 'claude-code') {
+        setAgentModels(CLAUDE_CODE_MODELS)
+      } else {
+        const codex = await settingsService.listCodexModels()
+        setAgentModels(codex.models)
+        setCodexDefaults({ model: codex.defaultModel, effort: codex.defaultEffort })
+      }
     } catch (e) {
       setAgentError((e as Error).message)
     } finally {
@@ -130,12 +154,34 @@ export default function AIProviderSettings({ settings, connectionTestResult, onU
     if (agentProvider) void checkAgent(agentProvider)
   }, [agentProvider, checkAgent])
 
-  const savedModelMissing =
-    settings.ai.opencodeModel !== '' &&
-    opencodeModels.length > 0 &&
-    !opencodeModels.some((m) => m.id === settings.ai.opencodeModel)
-  const customClaudeModel =
-    settings.ai.claudeCodeModel !== '' && !CLAUDE_CODE_MODELS.some((m) => m.id === settings.ai.claudeCodeModel)
+  const fields = agentProvider ? AGENT_FIELDS[agentProvider] : null
+  const modelValue = fields ? settings.ai[fields.model] : ''
+  const effortValue = fields ? settings.ai[fields.effort] : ''
+  const savedModelMissing = modelValue !== '' && agentModels.length > 0 && !agentModels.some((m) => m.id === modelValue)
+  // The model a run will actually use, to know which reasoning levels apply.
+  const effectiveModelId = modelValue || (agentProvider === 'codex' ? codexDefaults.model : null)
+  const effectiveModel = agentModels.find((m) => m.id === effectiveModelId)
+  const reasoningLevels =
+    effectiveModel?.reasoningLevels ?? (agentProvider === 'claude-code' ? CLAUDE_CODE_LEVELS : [])
+  const savedEffortMissing = effortValue !== '' && !reasoningLevels.includes(effortValue)
+  const defaultEffortLabel =
+    agentProvider === 'codex' && codexDefaults.effort ? `Default (${codexDefaults.effort}, from config)` : 'Default'
+  const reasoningHint =
+    agentProvider === 'opencode' && !modelValue
+      ? 'Pick a model to choose its reasoning level.'
+      : reasoningLevels.length === 0 && agentModels.length > 0
+        ? 'This model has no reasoning levels to choose from.'
+        : 'Higher levels think longer: better analyses, but slower and they use more of your limits.'
+
+  const changeModel = (model: string) => {
+    if (!fields) return
+    const levels =
+      agentModels.find((m) => m.id === (model || (agentProvider === 'codex' ? codexDefaults.model : null)))
+        ?.reasoningLevels ?? (agentProvider === 'claude-code' ? CLAUDE_CODE_LEVELS : [])
+    // A level the new model doesn't accept would make runs fail; fall back to the default.
+    const effort = levels.includes(effortValue) ? effortValue : ''
+    onUpdate({ ai: { ...settings.ai, [fields.model]: model, [fields.effort]: effort } })
+  }
 
   const handleTestConnection = async () => {
     if (testingConnection) return
@@ -228,51 +274,50 @@ export default function AIProviderSettings({ settings, connectionTestResult, onU
             <span style={{ ...labelStyle, paddingTop: 8 }}>Model</span>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', gap: 8 }}>
-                {agentProvider === 'opencode' && (
-                  <Select
-                    value={settings.ai.opencodeModel}
-                    onChange={(e) => onUpdate({ ai: { ...settings.ai, opencodeModel: e.target.value } })}
-                    disabled={!agentStatus?.installed}
-                  >
-                    <option value="">Automatic (first free model)</option>
-                    {savedModelMissing && (
-                      <option value={settings.ai.opencodeModel}>{settings.ai.opencodeModel} (no longer listed)</option>
-                    )}
-                    {opencodeModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                        {model.contextWindow > 0 ? ` · ${formatContext(model.contextWindow)} context` : ''}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-                {agentProvider === 'claude-code' && (
-                  <Select
-                    value={settings.ai.claudeCodeModel}
-                    onChange={(e) => onUpdate({ ai: { ...settings.ai, claudeCodeModel: e.target.value } })}
-                    disabled={!agentStatus?.installed}
-                  >
-                    <option value="">Default (Claude Code's own setting)</option>
-                    {customClaudeModel && <option value={settings.ai.claudeCodeModel}>{settings.ai.claudeCodeModel}</option>}
-                    {CLAUDE_CODE_MODELS.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-                {agentProvider === 'codex' && (
-                  <input
-                    style={inputStyle}
-                    value={settings.ai.codexModel}
-                    onChange={(e) => onUpdate({ ai: { ...settings.ai, codexModel: e.target.value } })}
-                    placeholder="Default (from ~/.codex/config.toml)"
-                    disabled={!agentStatus?.installed}
-                  />
-                )}
+                <Select
+                  value={modelValue}
+                  onChange={(e) => changeModel(e.target.value)}
+                  disabled={!agentStatus?.installed}
+                >
+                  <option value="">
+                    {AGENT_FIELDS[agentProvider].defaultModel}
+                    {agentProvider === 'codex' && codexDefaults.model ? `: ${codexDefaults.model}` : ''}
+                  </option>
+                  {savedModelMissing && (
+                    <option value={modelValue}>
+                      {modelValue}
+                      {agentProvider === 'opencode' ? ' (no longer listed)' : ''}
+                    </option>
+                  )}
+                  {agentModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                      {model.contextWindow > 0 ? ` · ${formatContext(model.contextWindow)} context` : ''}
+                    </option>
+                  ))}
+                </Select>
                 {testButton}
               </div>
               <span style={hintStyle}>{agentInfo.note}</span>
+            </div>
+          </div>
+          <div style={{ ...rowStyle, alignItems: 'flex-start' }}>
+            <span style={{ ...labelStyle, paddingTop: 8 }}>Reasoning</span>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Select
+                value={effortValue}
+                onChange={(e) => fields && onUpdate({ ai: { ...settings.ai, [fields.effort]: e.target.value } })}
+                disabled={!agentStatus?.installed || (reasoningLevels.length === 0 && !savedEffortMissing)}
+              >
+                <option value="">{defaultEffortLabel}</option>
+                {savedEffortMissing && <option value={effortValue}>{effortValue} (not offered by this model)</option>}
+                {reasoningLevels.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </Select>
+              <span style={hintStyle}>{reasoningHint}</span>
             </div>
           </div>
         </>

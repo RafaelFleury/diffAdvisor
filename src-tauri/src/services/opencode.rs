@@ -7,25 +7,16 @@
 //! Runs use `--standalone`: the default shared background service does not
 //! see `OPENCODE_CONFIG_CONTENT`, so the agent's restrictions would not apply.
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use super::agent::{self, AgentConfig, EventParser, Invocation};
+use super::agent::{self, AgentConfig, EventParser, Invocation, ModelInfo};
 
 const AGENT_NAME: &str = "diffadvisor";
 const FREE_MODELS_PROVIDER: &str = "opencode";
 /// Tools the analysis agent may use; everything else is denied.
 const ALLOWED_TOOLS: &[&str] = &["read", "grep", "glob", "list"];
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelInfo {
-    pub id: String,
-    pub name: String,
-    pub context_window: u64,
-}
 
 /// Lists the zero-cost models offered by opencode's own provider.
 ///
@@ -71,6 +62,8 @@ struct CachedModel {
     context_window: u64,
     free: bool,
     deprecated: bool,
+    /// Accepted `#variant` suffixes (models.dev `reasoning_options` efforts).
+    reasoning_levels: Vec<String>,
 }
 
 fn parse_models_cache(json: &str) -> HashMap<String, CachedModel> {
@@ -93,9 +86,23 @@ fn parse_models_cache(json: &str) -> HashMap<String, CachedModel> {
                     context_window: meta["limit"]["context"].as_u64().unwrap_or(0),
                     free,
                     deprecated: meta["status"].as_str() == Some("deprecated"),
+                    reasoning_levels: reasoning_levels(&meta["reasoning_options"]),
                 },
             )
         })
+        .collect()
+}
+
+/// Effort values from a models.dev `reasoning_options` list, e.g.
+/// `[{"type": "toggle"}, {"type": "effort", "values": ["low", "high"]}]`.
+fn reasoning_levels(options: &serde_json::Value) -> Vec<String> {
+    options
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|option| option["type"] == "effort")
+        .flat_map(|option| option["values"].as_array().cloned().unwrap_or_default())
+        .filter_map(|value| value.as_str().map(str::to_string))
         .collect()
 }
 
@@ -113,12 +120,14 @@ fn select_free_models(models_stdout: &str, catalog: &HashMap<String, CachedModel
                     id: full_id,
                     name: meta.name.clone(),
                     context_window: meta.context_window,
+                    reasoning_levels: meta.reasoning_levels.clone(),
                 }),
                 Some(_) => None,
                 None if id.ends_with("-free") => Some(ModelInfo {
                     id: full_id,
                     name: id.to_string(),
                     context_window: 0,
+                    reasoning_levels: Vec::new(),
                 }),
                 None => None,
             }
@@ -159,7 +168,13 @@ pub fn invocation(config: &AgentConfig, prompt: &str) -> Invocation {
     let mut command = agent::base_command(&config.binary);
     command.args(["run", "--standalone", "--agent", AGENT_NAME, "--format", "json"]);
     if !config.model.is_empty() {
-        command.args(["-m", &config.model]);
+        // The reasoning level is a model variant: `provider/model#high`.
+        let model = if config.effort.is_empty() {
+            config.model.clone()
+        } else {
+            format!("{}#{}", config.model, config.effort)
+        };
+        command.args(["-m", &model]);
     }
     // The agent's root is the process working directory, set by the runner
     // (newer opencode releases dropped the `--dir` flag).
@@ -201,10 +216,12 @@ impl EventParser for Parser {
             }
             "tool_use" => Some(describe_tool(part, &self.workdir)),
             "error" => {
+                // 2.x: {"type", "message"}; 1.x: {"name", "data": {"message"}}.
                 let error = &event["error"];
                 self.error = Some(
-                    error["data"]["message"]
+                    error["message"]
                         .as_str()
+                        .or_else(|| error["data"]["message"].as_str())
                         .or_else(|| error["name"].as_str())
                         .unwrap_or("unknown error")
                         .to_string(),
@@ -255,7 +272,8 @@ mod tests {
     fn selects_free_listed_models() {
         let cache = r#"{
           "opencode": { "models": {
-            "free-one": { "name": "Free One", "cost": { "input": 0, "output": 0 }, "limit": { "context": 200000 } },
+            "free-one": { "name": "Free One", "cost": { "input": 0, "output": 0 }, "limit": { "context": 200000 },
+              "reasoning_options": [{ "type": "toggle" }, { "type": "effort", "values": ["low", "high"] }] },
             "paid": { "name": "Paid", "cost": { "input": 1.5, "output": 3 }, "limit": { "context": 100000 } },
             "old-free": { "name": "Old", "status": "deprecated", "cost": { "input": 0, "output": 0 } },
             "unlisted-free": { "name": "Unlisted", "cost": { "input": 0, "output": 0 } }
@@ -271,11 +289,13 @@ mod tests {
                     id: "opencode/free-one".to_string(),
                     name: "Free One".to_string(),
                     context_window: 200000,
+                    reasoning_levels: vec!["low".to_string(), "high".to_string()],
                 },
                 ModelInfo {
                     id: "opencode/new-alpha-free".to_string(),
                     name: "new-alpha-free".to_string(),
                     context_window: 0,
+                    reasoning_levels: Vec::new(),
                 },
             ]
         );
@@ -317,6 +337,11 @@ mod tests {
             r#"{"type":"error","error":{"name":"UnknownError","data":{"message":"Model not found"}}}"#,
         );
         assert_eq!(state.error.as_deref(), Some("Model not found"));
+
+        state.handle_line(
+            r#"{"type":"error","error":{"type":"provider.free-limit","message":"Free usage limit reached."}}"#,
+        );
+        assert_eq!(state.error.as_deref(), Some("Free usage limit reached."));
     }
 
     #[test]

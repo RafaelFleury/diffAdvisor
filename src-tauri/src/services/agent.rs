@@ -72,12 +72,25 @@ impl AgentKind {
     }
 }
 
+/// A model offered in Settings, with the reasoning levels it accepts
+/// (empty when it has none to choose from).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub context_window: u64,
+    pub reasoning_levels: Vec<String>,
+}
+
 #[derive(Clone)]
 pub struct AgentConfig {
     pub kind: AgentKind,
     pub binary: PathBuf,
     /// Model id in the CLI's own format; empty means the CLI's default.
     pub model: String,
+    /// Reasoning effort in the CLI's own vocabulary; empty means the default.
+    pub effort: String,
     /// Directory the agent runs in (the project repository, or a scratch dir).
     pub workdir: PathBuf,
     /// Extra directories outside `workdir` the agent may read.
@@ -93,6 +106,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("kind", &self.kind)
             .field("binary", &self.binary)
             .field("model", &self.model)
+            .field("effort", &self.effort)
             .field("workdir", &self.workdir)
             .finish()
     }
@@ -329,7 +343,16 @@ Reply with ONLY this JSON: {{\"code\": \"<code.txt content>\", \"note\": \"<note
 
         if let Some(binary) = find_binary(AgentKind::Opencode) {
             let models = opencode::list_free_models(&binary).await;
-            println!("opencode free models: {:?}", models.map(|m| m.into_iter().map(|m| (m.id, m.context_window)).collect::<Vec<_>>()));
+            println!("opencode free models: {:?}", models.map(|m| m.into_iter().map(|m| (m.id, m.reasoning_levels)).collect::<Vec<_>>()));
+        }
+        if let Some(binary) = find_binary(AgentKind::Codex) {
+            let models = codex::list_models(&binary).await.unwrap();
+            println!(
+                "codex models: {:?} default={:?}/{:?}",
+                models.models.iter().map(|m| (&m.id, &m.reasoning_levels)).collect::<Vec<_>>(),
+                models.default_model,
+                models.default_effort
+            );
         }
 
         for kind in [AgentKind::ClaudeCode, AgentKind::Codex, AgentKind::Opencode] {
@@ -337,16 +360,18 @@ Reply with ONLY this JSON: {{\"code\": \"<code.txt content>\", \"note\": \"<note
                 println!("{}: not installed", kind.label());
                 continue;
             };
-            let model = match kind {
-                AgentKind::ClaudeCode => "haiku".to_string(),
-                AgentKind::Opencode => "opencode/big-pickle".to_string(),
-                AgentKind::Codex => String::new(),
+            let (model, effort) = match kind {
+                AgentKind::ClaudeCode => ("haiku", "low"),
+                AgentKind::Opencode => ("opencode/beam-free", "low"),
+                AgentKind::Codex => ("", "low"),
             };
+            let (model, effort) = (model.to_string(), effort.to_string());
             let progress: ProgressFn = Arc::new(move |m: &str| println!("  [{}] {}", kind.label(), m));
             let config = AgentConfig {
                 kind,
                 binary,
                 model,
+                effort,
                 workdir: workdir.clone(),
                 readable_dirs: vec![extra.clone()],
                 timeout: Duration::from_secs(240),

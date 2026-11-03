@@ -21,6 +21,10 @@ export interface AISettings {
   claudeCodeModel: string
   /** Codex model id; empty uses the model from ~/.codex/config.toml. */
   codexModel: string
+  /** Reasoning effort per agent CLI; empty uses the model's default. */
+  opencodeEffort: string
+  claudeCodeEffort: string
+  codexEffort: string
   endpointUrl: string
   model: string
   apiKey: string
@@ -34,10 +38,20 @@ export interface AgentStatus {
   version: string | null
 }
 
-export interface OpencodeModel {
+export interface AgentModel {
   id: string
   name: string
   contextWindow: number
+  /** Reasoning levels the model accepts; empty when it has none to choose. */
+  reasoningLevels: string[]
+}
+
+export interface CodexModels {
+  models: AgentModel[]
+  /** `model` from ~/.codex/config.toml, used when no model is picked. */
+  defaultModel: string | null
+  /** `model_reasoning_effort` from ~/.codex/config.toml. */
+  defaultEffort: string | null
 }
 
 export interface AnalysisSettings {

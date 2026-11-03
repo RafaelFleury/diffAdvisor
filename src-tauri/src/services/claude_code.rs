@@ -27,6 +27,9 @@ pub fn invocation(config: &AgentConfig, prompt: &str) -> Invocation {
     if !config.model.is_empty() {
         command.args(["--model", &config.model]);
     }
+    if !config.effort.is_empty() {
+        command.args(["--effort", &config.effort]);
+    }
     for dir in &config.readable_dirs {
         command.arg("--add-dir").arg(dir);
     }

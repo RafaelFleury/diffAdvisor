@@ -13,7 +13,8 @@ import type {
   AppSettings,
   AgentProvider,
   AgentStatus,
-  OpencodeModel,
+  AgentModel,
+  CodexModels,
 } from '@/types/index.ts'
 import type {
   IProjectService,
@@ -214,7 +215,11 @@ export class TauriSettingsService implements ISettingsService {
     return invoke<AgentStatus>('get_agent_status', { provider })
   }
 
-  listOpencodeModels(): Promise<OpencodeModel[]> {
-    return invoke<OpencodeModel[]>('list_opencode_models')
+  listOpencodeModels(): Promise<AgentModel[]> {
+    return invoke<AgentModel[]>('list_opencode_models')
+  }
+
+  listCodexModels(): Promise<CodexModels> {
+    return invoke<CodexModels>('list_codex_models')
   }
 }

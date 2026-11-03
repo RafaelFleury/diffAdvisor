@@ -29,9 +29,10 @@ impl LlmConfig {
         match self {
             LlmConfig::Api(c) => format!("api endpoint={} model={}", c.endpoint_url, c.model),
             LlmConfig::Agent(c) => format!(
-                "{} model={}",
+                "{} model={} effort={}",
                 c.kind.label(),
-                if c.model.is_empty() { "default" } else { &c.model }
+                if c.model.is_empty() { "default" } else { &c.model },
+                if c.effort.is_empty() { "default" } else { &c.effort }
             ),
         }
     }

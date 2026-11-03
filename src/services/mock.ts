@@ -11,7 +11,8 @@ import type {
   AppSettings,
   AgentProvider,
   AgentStatus,
-  OpencodeModel,
+  AgentModel,
+  CodexModels,
 } from '@/types/index.ts'
 import type {
   IProjectService,
@@ -872,6 +873,9 @@ const mockSettings: AppSettings = {
     opencodeModel: 'opencode/big-pickle',
     claudeCodeModel: '',
     codexModel: '',
+    opencodeEffort: '',
+    claudeCodeEffort: '',
+    codexEffort: '',
     endpointUrl: 'https://api.anthropic.com/v1',
     model: 'Claude Sonnet 4',
     apiKey: 'sk-ant-••••••••••••••••',
@@ -1159,11 +1163,21 @@ export class MockSettingsService implements ISettingsService {
     return { installed: true, path: `/usr/local/bin/${binary}`, version: '1.19.3' }
   }
 
-  async listOpencodeModels(): Promise<OpencodeModel[]> {
+  async listOpencodeModels(): Promise<AgentModel[]> {
     await delay()
     return [
-      { id: 'opencode/big-pickle', name: 'Big Pickle', contextWindow: 200000 },
-      { id: 'opencode/beam-free', name: 'Beam Free', contextWindow: 1048576 },
+      { id: 'opencode/big-pickle', name: 'Big Pickle', contextWindow: 200000, reasoningLevels: [] },
+      { id: 'opencode/beam-free', name: 'Beam Free', contextWindow: 1048576, reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
     ]
   }
+
+  async listCodexModels(): Promise<CodexModels> {
+    await delay()
+    return {
+      models: [{ id: 'gpt-6-luna', name: 'GPT-6-Luna', contextWindow: 272000, reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'] }],
+      defaultModel: 'gpt-6-luna',
+      defaultEffort: 'high',
+    }
+  }
+
 }

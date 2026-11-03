@@ -5,7 +5,9 @@ use tauri::State;
 
 use crate::services::ai::{AiConfig, LlmConfig};
 use crate::services::agent::{self, AgentConfig, AgentKind};
-use crate::services::opencode::{self, ModelInfo};
+use crate::services::agent::ModelInfo;
+use crate::services::codex::{self, CodexModels};
+use crate::services::opencode;
 use crate::services::secrets;
 use crate::state::AppState;
 
@@ -45,10 +47,11 @@ pub async fn load_llm_config(
             api_key: secrets::load_api_key(&db),
             requires_output_cap: db.get_setting("ai.requiresOutputCap").ok().flatten(),
         };
+        // (model, reasoning effort) per agent CLI.
         let models = [
-            setting("ai.opencodeModel"),
-            setting("ai.claudeCodeModel"),
-            setting("ai.codexModel"),
+            (setting("ai.opencodeModel"), setting("ai.opencodeEffort")),
+            (setting("ai.claudeCodeModel"), setting("ai.claudeCodeEffort")),
+            (setting("ai.codexModel"), setting("ai.codexEffort")),
         ];
         (setting("ai.provider"), api_config, models)
     };
@@ -68,19 +71,24 @@ pub async fn load_llm_config(
         )
     })?;
 
-    let [opencode_model, claude_code_model, codex_model] = models;
-    let model = match kind {
-        // opencode needs an explicit model; fall back to its first free one.
-        AgentKind::Opencode if opencode_model.is_empty() => opencode::list_free_models(&binary)
-            .await?
-            .into_iter()
-            .next()
-            .map(|m| m.id)
-            .ok_or("No free opencode models are available. Pick a model in Settings.")?,
-        AgentKind::Opencode => opencode_model,
-        AgentKind::ClaudeCode => claude_code_model.trim().to_string(),
-        AgentKind::Codex => codex_model.trim().to_string(),
+    let [opencode_choice, claude_code_choice, codex_choice] = models;
+    let (model, effort) = match kind {
+        // opencode needs an explicit model; fall back to its first free one,
+        // at its default reasoning level (levels differ per model).
+        AgentKind::Opencode if opencode_choice.0.is_empty() => {
+            let first = opencode::list_free_models(&binary)
+                .await?
+                .into_iter()
+                .next()
+                .map(|m| m.id)
+                .ok_or("No free opencode models are available. Pick a model in Settings.")?;
+            (first, String::new())
+        }
+        AgentKind::Opencode => opencode_choice,
+        AgentKind::ClaudeCode => claude_code_choice,
+        AgentKind::Codex => codex_choice,
     };
+    let (model, effort) = (model.trim().to_string(), effort.trim().to_string());
 
     let workdir = match workdir {
         Some(dir) => dir.to_path_buf(),
@@ -91,6 +99,7 @@ pub async fn load_llm_config(
         kind,
         binary,
         model,
+        effort,
         workdir,
         readable_dirs,
         timeout,
@@ -129,6 +138,12 @@ pub async fn get_agent_status(provider: String) -> Result<AgentStatusDto, String
 pub async fn list_opencode_models() -> Result<Vec<ModelInfo>, String> {
     let binary = agent::find_binary(AgentKind::Opencode).ok_or("opencode was not found")?;
     opencode::list_free_models(&binary).await
+}
+
+#[tauri::command]
+pub async fn list_codex_models() -> Result<CodexModels, String> {
+    let binary = agent::find_binary(AgentKind::Codex).ok_or("Codex was not found")?;
+    codex::list_models(&binary).await
 }
 
 /// Stops any in-flight agent run (debrief, checkpoint or note generation).

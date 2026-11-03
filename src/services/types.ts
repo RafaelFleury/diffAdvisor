@@ -11,7 +11,8 @@ import type {
   AppSettings,
   AgentProvider,
   AgentStatus,
-  OpencodeModel,
+  AgentModel,
+  CodexModels,
 } from '@/types/index.ts'
 
 export interface IProjectService {
@@ -63,5 +64,6 @@ export interface ISettingsService {
   addSkill(skill: Omit<Skill, 'id' | 'autoDetected' | 'builtIn'>): Promise<Skill>
   testConnection(): Promise<{ success: boolean; message: string }>
   getAgentStatus(provider: AgentProvider): Promise<AgentStatus>
-  listOpencodeModels(): Promise<OpencodeModel[]>
+  listOpencodeModels(): Promise<AgentModel[]>
+  listCodexModels(): Promise<CodexModels>
 }

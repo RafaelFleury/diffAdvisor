@@ -71,6 +71,7 @@ fn main() {
             commands::settings::test_connection,
             commands::llm::get_agent_status,
             commands::llm::list_opencode_models,
+            commands::llm::list_codex_models,
             commands::llm::cancel_ai_run,
         ])
         .run(tauri::generate_context!())

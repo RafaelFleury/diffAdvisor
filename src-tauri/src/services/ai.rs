@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
-use super::opencode::{self, OpencodeConfig};
+use super::agent::{self, AgentConfig};
 
 #[derive(Debug, Clone)]
 pub struct AiConfig {
@@ -12,22 +12,27 @@ pub struct AiConfig {
 }
 
 /// Where completions are sent: an OpenAI-compatible HTTP endpoint (legacy),
-/// or the opencode CLI, which can explore the repository on its own.
+/// or a coding-agent CLI (opencode, Claude Code, Codex), which can explore
+/// the repository on its own.
 #[derive(Debug, Clone)]
 pub enum LlmConfig {
     Api(AiConfig),
-    Opencode(OpencodeConfig),
+    Agent(AgentConfig),
 }
 
 impl LlmConfig {
     pub fn is_agentic(&self) -> bool {
-        matches!(self, LlmConfig::Opencode(_))
+        matches!(self, LlmConfig::Agent(_))
     }
 
     pub fn describe(&self) -> String {
         match self {
             LlmConfig::Api(c) => format!("api endpoint={} model={}", c.endpoint_url, c.model),
-            LlmConfig::Opencode(c) => format!("opencode model={}", c.model),
+            LlmConfig::Agent(c) => format!(
+                "{} model={}",
+                c.kind.label(),
+                if c.model.is_empty() { "default" } else { &c.model }
+            ),
         }
     }
 }
@@ -126,15 +131,37 @@ pub struct KbNoteInput {
     pub category: String,
     pub tags: Vec<String>,
     pub links_to: Vec<String>,
-    pub existing_content: Option<String>,
+    pub existing_note: Option<ExistingNote>,
     pub full_debrief_json: String,
     pub diff_snippet: String,
     pub commit_message: String,
     pub project_name: String,
-    pub existing_titles: Vec<String>,
+    /// `title :: category` lines, already capped to the prompt budget.
     pub existing_notes_catalog: Vec<String>,
+    /// Notes left out of `existing_notes_catalog` by the cap.
+    pub catalog_omitted: usize,
     /// Prompt section with related notes found by keyword search (may be empty).
     pub related_notes: String,
+}
+
+/// A note with the same title that already exists in the knowledge base.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ExistingNote {
+    /// Small enough to send whole; the model rewrites it with the new material merged in.
+    Full(String),
+    /// Too long to send whole. The model only writes new sections, which the
+    /// app appends, so nothing it did not see can be lost.
+    TooLong {
+        file_path: String,
+        outline: String,
+        excerpt: String,
+    },
+}
+
+impl ExistingNote {
+    pub fn is_append_only(&self) -> bool {
+        matches!(self, ExistingNote::TooLong { .. })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,29 +293,39 @@ Do not try to create or modify files: return the note as JSON and the app will s
         system.to_string()
     };
 
-    let existing_titles_str = if note_input.existing_titles.is_empty() {
-        String::new()
-    } else {
-        format!("\n\nExisting KB note titles for linking:\n{}", note_input.existing_titles.join(", "))
+    let existing_content_str = match &note_input.existing_note {
+        None => String::new(),
+        Some(ExistingNote::Full(content)) => format!("\n\nExisting note content to merge with:\n{}", content),
+        Some(ExistingNote::TooLong { file_path, outline, excerpt }) => format!(
+            "\n\nA note with this title already exists and is too long to rewrite (`{}`). \
+Do NOT rewrite it. Write ONLY the new material this commit adds, as one or more `##` sections \
+without an H1 heading; the app appends your sections to the end of the note. \
+Skip anything its current sections already cover.\n\nIts current headings:\n{}\n\nIts beginning:\n{}",
+            file_path, outline, excerpt
+        ),
     };
-
-    let existing_content_str = note_input
-        .existing_content
-        .as_ref()
-        .map(|c| format!("\n\nExisting note content to merge with:\n{}", c))
-        .unwrap_or_default();
 
     let existing_catalog_str = if note_input.existing_notes_catalog.is_empty() {
         String::new()
     } else {
+        let omitted = if note_input.catalog_omitted == 0 {
+            String::new()
+        } else {
+            format!(
+                "\n({} more notes in other categories are not listed{}.)",
+                note_input.catalog_omitted,
+                if config.is_agentic() { "; search the knowledge base folder for them" } else { "" }
+            )
+        };
         format!(
-            "\n\nExisting KB notes catalog (title :: category):\n{}",
-            note_input.existing_notes_catalog.join("\n")
+            "\n\nExisting KB notes catalog (title :: category; link them with their exact titles):\n{}{}",
+            note_input.existing_notes_catalog.join("\n"),
+            omitted
         )
     };
 
     let user = format!(
-        "Generate a knowledge base note.\n\nTitle: {}\nCategory: {}\nTags: {}\nLinks to: {}\nProject: {}\nCommit: {}\n\nFull debrief JSON:\n```json\n{}\n```\n\nRelevant diff snippet:\n```\n{}\n```{}{}{}{}",
+        "Generate a knowledge base note.\n\nTitle: {}\nCategory: {}\nTags: {}\nLinks to: {}\nProject: {}\nCommit: {}\n\nFull debrief JSON:\n```json\n{}\n```\n\nRelevant diff snippet:\n```\n{}\n```{}{}{}",
         note_input.title,
         note_input.category,
         note_input.tags.join(", "),
@@ -297,7 +334,6 @@ Do not try to create or modify files: return the note as JSON and the app will s
         note_input.commit_message,
         note_input.full_debrief_json,
         note_input.diff_snippet,
-        existing_titles_str,
         existing_catalog_str,
         existing_content_str,
         if note_input.related_notes.is_empty() {
@@ -381,9 +417,9 @@ async fn call_chat_completion(
 ) -> Result<CompletionResult, AiError> {
     match config {
         LlmConfig::Api(api) => call_api(api, system, user, temperature, timeout).await,
-        LlmConfig::Opencode(oc) => {
+        LlmConfig::Agent(agent_config) => {
             let prompt = format!("{}\n\n---\n\n{}", system, user);
-            let content = opencode::run(oc, &prompt).await.map_err(|e| {
+            let content = agent::run(agent_config, &prompt).await.map_err(|e| {
                 if e == "Cancelled" {
                     AiError::Cancelled
                 } else {

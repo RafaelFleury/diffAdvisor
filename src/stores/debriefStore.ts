@@ -74,7 +74,7 @@ interface DebriefState {
   gapCount: number
   loading: boolean
   debriefLoading: boolean
-  /** What the AI agent has done so far in the running debrief (opencode only). */
+  /** What the AI agent has done so far in the running debrief (agent CLI providers only). */
   debriefProgress: string[]
   error: string | null
   rawDebriefText: string | null

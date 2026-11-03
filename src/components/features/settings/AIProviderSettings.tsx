@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Toggle from '@/components/ui/Toggle.tsx'
 import Select from '@/components/ui/Select.tsx'
 import { settingsService } from '@/services/index.ts'
-import type { AIProvider, AppSettings, OpencodeModel, OpencodeStatus } from '@/types/index.ts'
+import type { AgentProvider, AgentStatus, AIProvider, AppSettings, OpencodeModel } from '@/types/index.ts'
 
 interface AIProviderSettingsProps {
   settings: AppSettings
@@ -59,39 +59,83 @@ const hintStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
 }
 
+const AGENT_INFO: Record<AgentProvider, { label: string; install: React.ReactNode; note: string }> = {
+  opencode: {
+    label: 'opencode',
+    install: (
+      <>
+        Install it with <code>curl -fsSL https://opencode.ai/install | bash</code> (see opencode.ai), then press
+        Recheck. No login is needed for the free models.
+      </>
+    ),
+    note: 'Free models are hosted by opencode. Review their data-use terms before analyzing proprietary code.',
+  },
+  'claude-code': {
+    label: 'Claude Code',
+    install: (
+      <>
+        Install it with <code>curl -fsSL https://claude.ai/install.sh | bash</code>, run <code>claude</code> once in a
+        terminal to log in, then press Recheck.
+      </>
+    ),
+    note: 'Uses your Claude Code login and its usage limits. It can read only the repository, the commit diff and the knowledge base.',
+  },
+  codex: {
+    label: 'Codex',
+    install: (
+      <>
+        Install it with <code>npm install -g @openai/codex</code>, run <code>codex login</code> in a terminal, then
+        press Recheck.
+      </>
+    ),
+    note: "Uses your Codex login, its usage limits and ~/.codex/config.toml. It runs in Codex's read-only sandbox, which cannot change files but can read any folder you can.",
+  },
+}
+
+const CLAUDE_CODE_MODELS = [
+  { id: 'fable', name: 'Fable (latest)' },
+  { id: 'opus', name: 'Opus (latest)' },
+  { id: 'sonnet', name: 'Sonnet (latest)' },
+  { id: 'haiku', name: 'Haiku (latest)' },
+]
+
 const formatContext = (tokens: number) =>
   tokens >= 1_000_000 ? `${(tokens / 1_000_000).toFixed(1)}M` : `${Math.round(tokens / 1000)}k`
 
 export default function AIProviderSettings({ settings, connectionTestResult, onUpdate, onTestConnection }: AIProviderSettingsProps) {
   const [testingConnection, setTestingConnection] = useState(false)
-  const [opencodeStatus, setOpencodeStatus] = useState<OpencodeStatus | null>(null)
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
   const [opencodeModels, setOpencodeModels] = useState<OpencodeModel[]>([])
-  const [opencodeError, setOpencodeError] = useState<string | null>(null)
-  const [checkingOpencode, setCheckingOpencode] = useState(false)
-  const isOpencode = settings.ai.provider === 'opencode'
+  const [agentError, setAgentError] = useState<string | null>(null)
+  const [checkingAgent, setCheckingAgent] = useState(false)
+  const agentProvider: AgentProvider | null = settings.ai.provider === 'api' ? null : settings.ai.provider
+  const agentInfo = agentProvider ? AGENT_INFO[agentProvider] : null
 
-  const checkOpencode = useCallback(async () => {
-    setCheckingOpencode(true)
-    setOpencodeError(null)
+  const checkAgent = useCallback(async (provider: AgentProvider) => {
+    setCheckingAgent(true)
+    setAgentStatus(null)
+    setAgentError(null)
     try {
-      const status = await settingsService.getOpencodeStatus()
-      setOpencodeStatus(status)
-      setOpencodeModels(status.installed ? await settingsService.listOpencodeModels() : [])
+      const status = await settingsService.getAgentStatus(provider)
+      setAgentStatus(status)
+      setOpencodeModels(provider === 'opencode' && status.installed ? await settingsService.listOpencodeModels() : [])
     } catch (e) {
-      setOpencodeError((e as Error).message)
+      setAgentError((e as Error).message)
     } finally {
-      setCheckingOpencode(false)
+      setCheckingAgent(false)
     }
   }, [])
 
   useEffect(() => {
-    if (isOpencode) void checkOpencode()
-  }, [isOpencode, checkOpencode])
+    if (agentProvider) void checkAgent(agentProvider)
+  }, [agentProvider, checkAgent])
 
   const savedModelMissing =
     settings.ai.opencodeModel !== '' &&
     opencodeModels.length > 0 &&
     !opencodeModels.some((m) => m.id === settings.ai.opencodeModel)
+  const customClaudeModel =
+    settings.ai.claudeCodeModel !== '' && !CLAUDE_CODE_MODELS.some((m) => m.id === settings.ai.claudeCodeModel)
 
   const handleTestConnection = async () => {
     if (testingConnection) return
@@ -133,48 +177,49 @@ export default function AIProviderSettings({ settings, connectionTestResult, onU
           onChange={(e) => onUpdate({ ai: { ...settings.ai, provider: e.target.value as AIProvider } })}
         >
           <option value="opencode">opencode (free models, explores the repo)</option>
+          <option value="claude-code">Claude Code (your Claude login, explores the repo)</option>
+          <option value="codex">Codex (your ChatGPT/OpenAI login, explores the repo)</option>
           <option value="api">API key (legacy)</option>
         </Select>
       </div>
-      {isOpencode ? (
+      {agentProvider && agentInfo ? (
         <>
           <div style={{ ...rowStyle, alignItems: 'flex-start' }}>
-            <span style={{ ...labelStyle, paddingTop: 2 }}>opencode</span>
+            <span style={{ ...labelStyle, paddingTop: 2 }}>{agentInfo.label}</span>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
                 <span
                   className="font-mono"
                   style={{
                     fontSize: 12,
-                    color: !opencodeStatus
+                    color: !agentStatus
                       ? 'var(--text-tertiary)'
-                      : opencodeStatus.installed
+                      : agentStatus.installed
                         ? 'var(--success)'
                         : 'var(--warning)',
                   }}
                 >
-                  {!opencodeStatus
-                    ? opencodeError
+                  {!agentStatus
+                    ? agentError
                       ? 'Check failed'
                       : 'Checking...'
-                    : opencodeStatus.installed
-                      ? `Installed${opencodeStatus.version ? ` (v${opencodeStatus.version})` : ''}`
+                    : agentStatus.installed
+                      ? `Installed${agentStatus.version ? ` (v${agentStatus.version})` : ''}`
                       : 'Not found'}
                 </span>
-                <button style={auxButtonStyle} onClick={() => void checkOpencode()} disabled={checkingOpencode}>
-                  {checkingOpencode ? '...' : 'Recheck'}
+                <button
+                  style={auxButtonStyle}
+                  onClick={() => void checkAgent(agentProvider)}
+                  disabled={checkingAgent}
+                >
+                  {checkingAgent ? '...' : 'Recheck'}
                 </button>
               </div>
-              {opencodeStatus && !opencodeStatus.installed && (
-                <span style={hintStyle}>
-                  Install it with <code>curl -fsSL https://opencode.ai/install | bash</code> (see opencode.ai), then
-                  press Recheck. No login is needed for the free models.
-                </span>
-              )}
-              {opencodeStatus?.path && <span style={hintStyle}>{opencodeStatus.path}</span>}
-              {opencodeError && (
+              {agentStatus && !agentStatus.installed && <span style={hintStyle}>{agentInfo.install}</span>}
+              {agentStatus?.path && <span style={hintStyle}>{agentStatus.path}</span>}
+              {agentError && (
                 <span className="font-mono" style={{ fontSize: 11, color: 'var(--critical)' }}>
-                  {opencodeError}
+                  {agentError}
                 </span>
               )}
             </div>
@@ -183,26 +228,51 @@ export default function AIProviderSettings({ settings, connectionTestResult, onU
             <span style={{ ...labelStyle, paddingTop: 8 }}>Model</span>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Select
-                  value={settings.ai.opencodeModel}
-                  onChange={(e) => onUpdate({ ai: { ...settings.ai, opencodeModel: e.target.value } })}
-                  disabled={!opencodeStatus?.installed}
-                >
-                  <option value="">Automatic (first free model)</option>
-                  {savedModelMissing && (
-                    <option value={settings.ai.opencodeModel}>{settings.ai.opencodeModel} (no longer listed)</option>
-                  )}
-                  {opencodeModels.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name} · {formatContext(model.contextWindow)} context
-                    </option>
-                  ))}
-                </Select>
+                {agentProvider === 'opencode' && (
+                  <Select
+                    value={settings.ai.opencodeModel}
+                    onChange={(e) => onUpdate({ ai: { ...settings.ai, opencodeModel: e.target.value } })}
+                    disabled={!agentStatus?.installed}
+                  >
+                    <option value="">Automatic (first free model)</option>
+                    {savedModelMissing && (
+                      <option value={settings.ai.opencodeModel}>{settings.ai.opencodeModel} (no longer listed)</option>
+                    )}
+                    {opencodeModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                        {model.contextWindow > 0 ? ` · ${formatContext(model.contextWindow)} context` : ''}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+                {agentProvider === 'claude-code' && (
+                  <Select
+                    value={settings.ai.claudeCodeModel}
+                    onChange={(e) => onUpdate({ ai: { ...settings.ai, claudeCodeModel: e.target.value } })}
+                    disabled={!agentStatus?.installed}
+                  >
+                    <option value="">Default (Claude Code's own setting)</option>
+                    {customClaudeModel && <option value={settings.ai.claudeCodeModel}>{settings.ai.claudeCodeModel}</option>}
+                    {CLAUDE_CODE_MODELS.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+                {agentProvider === 'codex' && (
+                  <input
+                    style={inputStyle}
+                    value={settings.ai.codexModel}
+                    onChange={(e) => onUpdate({ ai: { ...settings.ai, codexModel: e.target.value } })}
+                    placeholder="Default (from ~/.codex/config.toml)"
+                    disabled={!agentStatus?.installed}
+                  />
+                )}
                 {testButton}
               </div>
-              <span style={hintStyle}>
-                Free models are hosted by opencode. Review their data-use terms before analyzing proprietary code.
-              </span>
+              <span style={hintStyle}>{agentInfo.note}</span>
             </div>
           </div>
         </>

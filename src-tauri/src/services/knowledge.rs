@@ -424,6 +424,81 @@ Link them by exact title where relevant and don't repeat what they already expla
     )
 }
 
+/// Builds the `title :: category` catalog of existing notes for a note-writing
+/// prompt, capped at `budget_chars`. Notes in the target category come first,
+/// then notes sharing its top-level folder, then the rest, so the entries most
+/// likely to be linked survive the cap. Returns the lines and how many notes
+/// were left out.
+pub fn select_note_catalog(
+    notes: &[(String, String)],
+    target_category: &str,
+    budget_chars: usize,
+) -> (Vec<String>, usize) {
+    let top_level = |category: &str| category.split('/').next().unwrap_or_default().to_string();
+    let target_top = top_level(target_category);
+    let rank = |category: &str| {
+        if category == target_category {
+            0
+        } else if !target_top.is_empty() && top_level(category) == target_top {
+            1
+        } else {
+            2
+        }
+    };
+
+    let mut sorted: Vec<&(String, String)> = notes.iter().collect();
+    sorted.sort_by(|a, b| (rank(&a.1), &a.1, &a.0).cmp(&(rank(&b.1), &b.1, &b.0)));
+
+    let mut lines = Vec::new();
+    let mut used = 0;
+    for (title, category) in &sorted {
+        let line = if category.is_empty() {
+            title.clone()
+        } else {
+            format!("{} :: {}", title, category)
+        };
+        let cost = line.chars().count() + 1;
+        if used + cost > budget_chars {
+            break;
+        }
+        used += cost;
+        lines.push(line);
+    }
+    let omitted = sorted.len() - lines.len();
+    (lines, omitted)
+}
+
+/// The note's headings, one per line, so a model can see everything a long
+/// note covers without reading all of it.
+pub fn note_outline(content: &str) -> String {
+    let mut in_code_fence = false;
+    content
+        .lines()
+        .filter(|line| {
+            if line.trim_start().starts_with("```") {
+                in_code_fence = !in_code_fence;
+                return false;
+            }
+            !in_code_fence && line.starts_with('#')
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Appends newly written sections to an existing note body, dropping the H1
+/// the model may have added (the note already has its own).
+pub fn append_note_sections(existing: &str, new_sections: &str) -> String {
+    let new_sections = new_sections.trim();
+    let new_sections = match new_sections.lines().next() {
+        Some(first) if first.starts_with("# ") => new_sections[first.len()..].trim_start(),
+        _ => new_sections,
+    };
+    if new_sections.is_empty() {
+        return existing.to_string();
+    }
+    format!("{}\n\n{}\n", existing.trim_end(), new_sections)
+}
+
 /// First `max_chars` characters of a note body, cut at a line break when possible.
 pub fn note_excerpt(content: &str, max_chars: usize) -> String {
     let content = content.trim();
@@ -470,6 +545,42 @@ pub fn expand_kb_path(path_str: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_select_note_catalog_prefers_same_category_and_respects_budget() {
+        let notes = vec![
+            ("Zeta".to_string(), "backend/db".to_string()),
+            ("Alpha".to_string(), "frontend/react".to_string()),
+            ("Beta".to_string(), "algorithms/graphics".to_string()),
+            ("Gamma".to_string(), "algorithms/sorting".to_string()),
+            ("Loose".to_string(), String::new()),
+        ];
+
+        let (all, omitted) = select_note_catalog(&notes, "algorithms/graphics", 10_000);
+        assert_eq!(omitted, 0);
+        assert_eq!(all[0], "Beta :: algorithms/graphics");
+        assert_eq!(all[1], "Gamma :: algorithms/sorting");
+        assert!(all.contains(&"Loose".to_string()));
+
+        // Room for exactly the two highest-ranked lines (each line costs its length + 1).
+        let budget = "Beta :: algorithms/graphics".len() + "Gamma :: algorithms/sorting".len() + 2;
+        let (capped, omitted) = select_note_catalog(&notes, "algorithms/graphics", budget);
+        assert_eq!(capped, ["Beta :: algorithms/graphics", "Gamma :: algorithms/sorting"]);
+        assert_eq!(omitted, 3);
+    }
+
+    #[test]
+    fn test_append_note_sections_drops_generated_h1() {
+        let merged = append_note_sections("# Note\n\nOld text.\n\n", "# Note\n\n## New Part\nNew text.");
+        assert_eq!(merged, "# Note\n\nOld text.\n\n## New Part\nNew text.\n");
+        assert_eq!(append_note_sections("# Note\nOld.", "# Note\n"), "# Note\nOld.");
+    }
+
+    #[test]
+    fn test_note_outline_lists_headings_outside_code() {
+        let outline = note_outline("# Title\ntext\n## Part A\n```bash\n# not a heading\n```\n### Detail\n");
+        assert_eq!(outline, "# Title\n## Part A\n### Detail");
+    }
 
     #[test]
     fn test_extract_search_terms_splits_identifiers_and_drops_noise() {

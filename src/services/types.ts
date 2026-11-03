@@ -9,7 +9,8 @@ import type {
   KnowledgeNote,
   Skill,
   AppSettings,
-  OpencodeStatus,
+  AgentProvider,
+  AgentStatus,
   OpencodeModel,
 } from '@/types/index.ts'
 
@@ -61,6 +62,6 @@ export interface ISettingsService {
   toggleSkill(skillId: string, enabled: boolean): Promise<void>
   addSkill(skill: Omit<Skill, 'id' | 'autoDetected' | 'builtIn'>): Promise<Skill>
   testConnection(): Promise<{ success: boolean; message: string }>
-  getOpencodeStatus(): Promise<OpencodeStatus>
+  getAgentStatus(provider: AgentProvider): Promise<AgentStatus>
   listOpencodeModels(): Promise<OpencodeModel[]>
 }

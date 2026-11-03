@@ -333,7 +333,7 @@ pub async fn run_debrief(
         (depth, mode, ignored, context_window)
     };
 
-    let diffs_dir = llm::opencode_dir("diffs")?;
+    let diffs_dir = llm::agent_dir("diffs")?;
     let kb_root = Some(super::knowledge::get_kb_root(&state)).filter(|dir| dir.is_dir());
     let mut readable_dirs = vec![diffs_dir.clone()];
     readable_dirs.extend(kb_root.clone());
@@ -344,10 +344,10 @@ pub async fn run_debrief(
         DEBRIEF_TIMEOUT,
     )
     .await?;
-    if let ai::LlmConfig::Opencode(ref mut oc) = llm_config {
+    if let ai::LlmConfig::Agent(ref mut agent_config) = llm_config {
         let handle = app_handle.clone();
         let hash = commit_hash.clone();
-        oc.progress = Some(Arc::new(move |message: &str| {
+        agent_config.progress = Some(Arc::new(move |message: &str| {
             let _ = handle.emit(
                 "debrief_progress",
                 DebriefProgressEvent {

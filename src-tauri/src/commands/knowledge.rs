@@ -36,6 +36,14 @@ pub struct KnowledgeNoteDto {
 /// with `content_loaded: false`.
 const LISTING_CONTENT_BUDGET_CHARS: usize = 200_000;
 
+/// Prompt budgets (characters) for writing a knowledge base note. Together
+/// they keep each note-writing prompt well under 100k characters.
+const KB_PROMPT_CATALOG_CHARS: usize = 15_000;
+/// An existing note longer than this is not rewritten; new sections are appended.
+const KB_PROMPT_EXISTING_NOTE_CHARS: usize = 30_000;
+const KB_PROMPT_OUTLINE_CHARS: usize = 4_000;
+const KB_PROMPT_EXCERPT_CHARS: usize = 6_000;
+
 /// Note with its full content, read from disk.
 fn note_to_dto(note: &KnowledgeNote) -> KnowledgeNoteDto {
     let body = if !note.file_path.is_empty() {
@@ -373,26 +381,12 @@ pub async fn write_to_kb(
             );
         })
     };
-    if let ai::LlmConfig::Opencode(ref mut oc) = ai_config {
-        oc.progress = Some(emit_progress.clone());
+    if let ai::LlmConfig::Agent(ref mut agent_config) = ai_config {
+        agent_config.progress = Some(emit_progress.clone());
     }
 
-    // 3. Get existing KB notes catalog
+    // 3. Get existing KB notes (the catalog is capped per note, see below)
     let existing_kb_notes = kb_service::list_existing_note_titles(&kb_path);
-    let existing_titles: Vec<String> = existing_kb_notes
-        .iter()
-        .map(|(title, _)| title.clone())
-        .collect();
-    let existing_notes_catalog: Vec<String> = existing_kb_notes
-        .iter()
-        .map(|(title, category)| {
-            if category.is_empty() {
-                title.clone()
-            } else {
-                format!("{} :: {}", title, category)
-            }
-        })
-        .collect();
 
     // 4. Get full debrief and diff snippet
     let full_debrief_json = debrief.ai_response_json.clone().unwrap_or_default();
@@ -415,13 +409,32 @@ pub async fn write_to_kb(
         let preferred_existing_path = kb_path
             .join(&category)
             .join(format!("{}.md", kb_service::sanitize_filename(&suggested.title)));
-        let existing_content = if preferred_existing_path.exists() {
-            std::fs::read_to_string(&preferred_existing_path).ok()
+        let existing_path = if preferred_existing_path.exists() {
+            Some(preferred_existing_path.clone())
         } else {
             kb_service::find_existing_note(&kb_path, &suggested.title)
-                .and_then(|path| std::fs::read_to_string(path).ok())
-        }
-        .map(|raw| kb_service::strip_yaml_frontmatter(&raw));
+        };
+        let existing_body = existing_path
+            .as_ref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(|raw| kb_service::strip_yaml_frontmatter(&raw));
+        let existing_note = existing_body.as_ref().map(|body| {
+            if body.chars().count() <= KB_PROMPT_EXISTING_NOTE_CHARS {
+                ai::ExistingNote::Full(body.clone())
+            } else {
+                ai::ExistingNote::TooLong {
+                    file_path: existing_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                    outline: kb_service::note_excerpt(&kb_service::note_outline(body), KB_PROMPT_OUTLINE_CHARS),
+                    excerpt: kb_service::note_excerpt(body, KB_PROMPT_EXCERPT_CHARS),
+                }
+            }
+        });
+        let append_only = existing_note.as_ref().is_some_and(|n| n.is_append_only());
+        let (existing_notes_catalog, catalog_omitted) =
+            kb_service::select_note_catalog(&existing_kb_notes, &category, KB_PROMPT_CATALOG_CHARS);
 
         let search_text = format!(
             "{} {} {} {}",
@@ -442,13 +455,13 @@ pub async fn write_to_kb(
             category: category.clone(),
             tags: suggested.tags.clone(),
             links_to: suggested.links_to.clone(),
-            existing_content,
+            existing_note,
             full_debrief_json: full_debrief_json.clone(),
             diff_snippet: diff_snippet.clone(),
             commit_message: debrief.commit_message.clone(),
             project_name: project_name.clone(),
-            existing_titles: existing_titles.clone(),
-            existing_notes_catalog: existing_notes_catalog.clone(),
+            existing_notes_catalog,
+            catalog_omitted,
             related_notes: kb_service::format_related_notes(&related),
         };
 
@@ -476,14 +489,16 @@ pub async fn write_to_kb(
             let generated_filename = kb_service::sanitize_filename(&generated.title);
             let preferred_path = dir.join(format!("{}.md", preferred_filename));
             let generated_path = dir.join(format!("{}.md", generated_filename));
-            let file_path = if preferred_path.exists() {
-                preferred_path.clone()
-            } else if generated_path.exists() {
-                generated_path.clone()
-            } else {
-                preferred_path.clone()
+            let file_path = match (&existing_path, append_only) {
+                // New sections go at the end of the note the model saw.
+                (Some(path), true) => path.clone(),
+                _ if preferred_path.exists() => preferred_path.clone(),
+                _ if generated_path.exists() => generated_path.clone(),
+                _ => preferred_path.clone(),
             };
             let file_path_str = file_path.to_string_lossy().to_string();
+            // Appended sections never rename the note they extend.
+            let note_title = if append_only { suggested.title.clone() } else { generated.title.clone() };
 
             // Upsert semantics in DB: if this file already has a note row, update it
             let db = state.db();
@@ -498,7 +513,7 @@ pub async fn write_to_kb(
                 .unwrap_or_else(|| today.clone());
 
             let fm = kb_service::NoteFrontmatter {
-                title: generated.title.clone(),
+                title: note_title.clone(),
                 tags: suggested.tags.clone(),
                 category: category.clone(),
                 source_project: project_name.clone(),
@@ -508,13 +523,17 @@ pub async fn write_to_kb(
                 updated: existing_note.as_ref().map(|_| today.clone()),
             };
 
-            let note_body = kb_service::strip_yaml_frontmatter(&generated.content);
+            let generated_body = kb_service::strip_yaml_frontmatter(&generated.content);
+            let note_body = match (&existing_body, append_only) {
+                (Some(existing), true) => kb_service::append_note_sections(existing, &generated_body),
+                _ => generated_body,
+            };
             kb_service::write_note_atomic(&file_path, &fm, &note_body)?;
 
             let note = if let Some(existing) = existing_note {
                 db.update_knowledge_note(
                     existing.id,
-                    &generated.title,
+                    &note_title,
                     &category,
                     &file_path_str,
                     &suggested.tags,
@@ -526,7 +545,7 @@ pub async fn write_to_kb(
             } else {
                 db.create_knowledge_note(
                     Some(debrief.project_id),
-                    &generated.title,
+                    &note_title,
                     &category,
                     &file_path_str,
                     true,

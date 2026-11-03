@@ -11,7 +11,8 @@ import type {
   KnowledgeNote,
   Skill,
   AppSettings,
-  OpencodeStatus,
+  AgentProvider,
+  AgentStatus,
   OpencodeModel,
 } from '@/types/index.ts'
 import type {
@@ -209,8 +210,8 @@ export class TauriSettingsService implements ISettingsService {
     return invoke<{ success: boolean; message: string }>('test_connection')
   }
 
-  getOpencodeStatus(): Promise<OpencodeStatus> {
-    return invoke<OpencodeStatus>('get_opencode_status')
+  getAgentStatus(provider: AgentProvider): Promise<AgentStatus> {
+    return invoke<AgentStatus>('get_agent_status', { provider })
   }
 
   listOpencodeModels(): Promise<OpencodeModel[]> {

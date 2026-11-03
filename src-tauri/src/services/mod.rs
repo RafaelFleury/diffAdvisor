@@ -1,5 +1,8 @@
 pub mod git;
+pub mod agent;
 pub mod ai;
+pub mod claude_code;
+pub mod codex;
 pub mod context;
 pub mod skills;
 pub mod knowledge;

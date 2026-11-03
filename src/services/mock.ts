@@ -9,7 +9,8 @@ import type {
   KnowledgeNote,
   Skill,
   AppSettings,
-  OpencodeStatus,
+  AgentProvider,
+  AgentStatus,
   OpencodeModel,
 } from '@/types/index.ts'
 import type {
@@ -869,6 +870,8 @@ const mockSettings: AppSettings = {
   ai: {
     provider: 'opencode',
     opencodeModel: 'opencode/big-pickle',
+    claudeCodeModel: '',
+    codexModel: '',
     endpointUrl: 'https://api.anthropic.com/v1',
     model: 'Claude Sonnet 4',
     apiKey: 'sk-ant-••••••••••••••••',
@@ -1144,15 +1147,16 @@ export class MockSettingsService implements ISettingsService {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     await delay(800)
-    if (settings.ai.provider === 'opencode' || (settings.ai.apiKey && settings.ai.apiKey.length > 5)) {
+    if (settings.ai.provider !== 'api' || (settings.ai.apiKey && settings.ai.apiKey.length > 5)) {
       return { success: true, message: 'Connection successful! Model responded.' }
     }
     return { success: false, message: 'Connection refused: invalid API key.' }
   }
 
-  async getOpencodeStatus(): Promise<OpencodeStatus> {
+  async getAgentStatus(provider: AgentProvider): Promise<AgentStatus> {
     await delay()
-    return { installed: true, path: '/usr/local/bin/opencode', version: '1.19.3' }
+    const binary = { opencode: 'opencode', 'claude-code': 'claude', codex: 'codex' }[provider]
+    return { installed: true, path: `/usr/local/bin/${binary}`, version: '1.19.3' }
   }
 
   async listOpencodeModels(): Promise<OpencodeModel[]> {

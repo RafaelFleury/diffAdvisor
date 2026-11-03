@@ -71,8 +71,11 @@ export default function CodeView({ source, fromLine, toLine, highlight, selected
     }
     const start = fromLine ?? 1
     const end = Math.min(toLine ?? all.length, all.length)
-    const out: { no: number; segments: Segment[] }[] = []
-    for (let n = start; n <= end; n++) out.push({ no: n, segments: segmentsFor(all[n - 1] ?? '', byLine.get(n) ?? []) })
+    const out: { no: number; text: string; segments: Segment[] }[] = []
+    for (let n = start; n <= end; n++) {
+      const text = all[n - 1] ?? ''
+      out.push({ no: n, text, segments: segmentsFor(text, byLine.get(n) ?? []) })
+    }
     return out
   }, [source, fromLine, toLine])
 
@@ -84,7 +87,7 @@ export default function CodeView({ source, fromLine, toLine, highlight, selected
 
   return (
     <div style={frame(maxHeight)}>
-      {lines.map(({ no, segments }) => {
+      {lines.map(({ no, text, segments }) => {
         const hl = highlight && no >= highlight.from && no <= highlight.to
         return (
           <div
@@ -111,7 +114,7 @@ export default function CodeView({ source, fromLine, toLine, highlight, selected
                   <button
                     key={i}
                     type="button"
-                    onClick={() => onTerm({ text: seg.text, line: no })}
+                    onClick={() => onTerm({ text: seg.text, line: no, lineText: text })}
                     style={{
                       font: 'inherit',
                       color: colors.keyword,

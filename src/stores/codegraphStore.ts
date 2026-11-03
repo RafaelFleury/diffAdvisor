@@ -9,6 +9,7 @@ import type {
   TermExplanation,
 } from '@/types/codegraph.ts'
 import { codeGraphService } from '@/services/codegraph/index.ts'
+import { IS_MOCK_SERVICES } from '@/services/index.ts'
 import { useProjectStore } from '@/stores/projectStore.ts'
 import type { Offsets } from '@/components/features/codegraph/layout.ts'
 
@@ -26,11 +27,15 @@ export type PanelTab = 'function' | 'file'
 export interface SelectedTerm {
   text: string
   line: number
+  /** The line's text, so a cached explanation is not reused after the line changes. */
+  lineText: string
 }
 
 export type ExplainStatus = 'idle' | 'loading' | 'done' | 'error' | 'cancelled'
 
 interface CodeGraphState {
+  /** Project the session state below belongs to. */
+  projectKey: string | null
   graph: CodeGraph | null
   status: CodeGraphStatus | null
   loading: boolean
@@ -89,9 +94,41 @@ interface CodeGraphState {
 let analyzeTimer: ReturnType<typeof setTimeout> | null = null
 let analyzeRequest = 0
 
-function projectId(): string {
-  return useProjectStore.getState().activeProject?.id ?? 'mock'
+const MOCK_PROJECT_ID = 'mock'
+
+/** The active project's id, the sample project's id with mocks, or null when there is none. */
+function projectId(): string | null {
+  return useProjectStore.getState().activeProject?.id ?? (IS_MOCK_SERVICES ? MOCK_PROJECT_ID : null)
 }
+
+/** Tauri commands reject with a plain string; services and mocks throw Error. */
+function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (typeof e === 'string') return e
+  return String(e)
+}
+
+/** Session state that belongs to one project and is dropped when the project changes. */
+const PROJECT_SESSION = {
+  graph: null,
+  error: null,
+  entry: null,
+  depth: null,
+  depthText: '',
+  selectedId: null,
+  history: [],
+  panelTab: 'function',
+  fileTabId: null,
+  expanded: {},
+  offsets: {},
+  query: '',
+  sources: {},
+  term: null,
+  explanations: {},
+  explainStatus: 'idle',
+  explainError: null,
+  explainOpen: false,
+} satisfies Partial<CodeGraphState>
 
 function fnById(graph: CodeGraph | null, id: string | null): GraphFunction | undefined {
   if (!graph || !id) return undefined
@@ -99,7 +136,7 @@ function fnById(graph: CodeGraph | null, id: string | null): GraphFunction | und
 }
 
 export function explanationKey(fnId: string, term: SelectedTerm): string {
-  return `${fnId}|${term.text}|${term.line}`
+  return `${fnId}|${term.text}|${term.line}|${term.lineText}`
 }
 
 /** Distance that brings a ghost function into scope in the current mode. */
@@ -109,6 +146,7 @@ function scopeDistance(graph: CodeGraph, fn: GraphFunction): number | null {
 }
 
 export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
+  projectKey: null,
   graph: null,
   status: null,
   loading: false,
@@ -144,7 +182,7 @@ export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
       const status = await codeGraphService.getStatus()
       set({ status })
     } catch (e) {
-      set({ error: (e as Error).message })
+      set({ error: errorMessage(e) })
     }
   },
 
@@ -153,11 +191,16 @@ export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
       clearTimeout(analyzeTimer)
       analyzeTimer = null
     }
+    const pid = projectId()
+    if (!pid) return
+    const previous = get().projectKey
+    if (previous && previous !== pid) set({ ...PROJECT_SESSION, projectKey: pid })
+    else if (!previous) set({ projectKey: pid })
     const { mode, entry, depth, maxNodes } = get()
     const request = ++analyzeRequest
     set({ loading: true, error: null })
     try {
-      const graph = await codeGraphService.analyze(projectId(), { mode, entry, depth, maxNodes })
+      const graph = await codeGraphService.analyze(pid, { mode, entry, depth, maxNodes })
       if (request !== analyzeRequest) return
       const state = get()
 
@@ -197,7 +240,7 @@ export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
       if (fileToLoad) void get().loadSource(fileToLoad)
     } catch (e) {
       if (request !== analyzeRequest) return
-      set({ loading: false, error: (e as Error).message })
+      set({ loading: false, error: errorMessage(e) })
     }
   },
 
@@ -284,6 +327,7 @@ export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
       explainOpen: false,
       explainStatus: 'idle',
     })
+    if (fn) void get().loadSource(fn.fileId)
   },
 
   openFile: (fileId) => {
@@ -327,12 +371,16 @@ export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
   toggleExternals: () => set((s) => ({ showExternals: !s.showExternals })),
 
   loadSource: async (fileId) => {
-    if (get().sources[fileId]) return
+    const pid = get().projectKey
+    if (!pid || get().sources[fileId]) return
     try {
-      const source = await codeGraphService.getSource(projectId(), fileId)
+      const source = await codeGraphService.getSource(pid, fileId)
+      // Drop the answer if the project changed while it was loading.
+      if (get().projectKey !== pid) return
       set((s) => ({ sources: { ...s.sources, [fileId]: source } }))
     } catch (e) {
-      set({ error: (e as Error).message })
+      if (get().projectKey !== pid) return
+      set({ error: errorMessage(e) })
     }
   },
 
@@ -346,13 +394,13 @@ export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
   },
 
   toggleExplain: () => {
-    const { explainOpen, term, selectedId, graph, explanations } = get()
+    const { explainOpen, term, selectedId, graph, explanations, projectKey: pid } = get()
     if (explainOpen) {
       set({ explainOpen: false })
       return
     }
     const fn = fnById(graph, selectedId)
-    if (!term || !fn) return
+    if (!term || !fn || !pid) return
     const key = explanationKey(fn.id, term)
     if (explanations[key]) {
       set({ explainOpen: true, explainStatus: 'done' })
@@ -360,7 +408,7 @@ export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
     }
     set({ explainOpen: true, explainStatus: 'loading', explainError: null })
     codeGraphService
-      .explainTerm(projectId(), { term: term.text, fileId: fn.fileId, line: term.line, functionId: fn.id })
+      .explainTerm(pid, { term: term.text, fileId: fn.fileId, line: term.line, functionId: fn.id })
       .then((result) => {
         const current = get()
         if (current.term !== term || current.explainStatus !== 'loading') return
@@ -368,7 +416,7 @@ export const useCodeGraphStore = create<CodeGraphState>((set, get) => ({
       })
       .catch((e: unknown) => {
         if (get().term !== term || get().explainStatus === 'cancelled') return
-        const message = e instanceof Error ? e.message : String(e)
+        const message = errorMessage(e)
         set({ explainStatus: message === 'Cancelled' ? 'cancelled' : 'error', explainError: message })
       })
   },

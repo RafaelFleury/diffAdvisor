@@ -27,7 +27,8 @@ function relativeTime(iso: string): string {
 export default function CodeGraph() {
   const activeProject = useProjectStore((s) => s.activeProject)
   const loadActiveProject = useProjectStore((s) => s.loadActiveProject)
-  const graph = useCodeGraphStore((s) => s.graph)
+  const projectKey = useCodeGraphStore((s) => s.projectKey)
+  const storedGraph = useCodeGraphStore((s) => s.graph)
   const status = useCodeGraphStore((s) => s.status)
   const loading = useCodeGraphStore((s) => s.loading)
   const error = useCodeGraphStore((s) => s.error)
@@ -37,6 +38,8 @@ export default function CodeGraph() {
   const loadStatus = useCodeGraphStore((s) => s.loadStatus)
   const analyze = useCodeGraphStore((s) => s.analyze)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Until the next analysis, the stored graph may still belong to the previously active project.
+  const graph = IS_MOCK_SERVICES || projectKey === activeProject?.id ? storedGraph : null
 
   useEffect(() => {
     void loadStatus()

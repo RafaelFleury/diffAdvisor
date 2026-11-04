@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "tauri": "(cargo sweep --time 7 src-tauri >/dev/null 2>&1 || echo 'cargo-sweep not found; skipping target/ cleanup') && tauri",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

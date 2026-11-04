@@ -36,3 +36,8 @@ crate-type = ["lib"]
 name = "diffadvisor"
 path = "src/main.rs"
 required-features = ["tauri-app"]
+
+# Skip debug info for dependencies in dev builds: it is most of target/'s
+# size, and stepping into Tauri or tokio internals is rarely needed.
+[profile.dev.package."*"]
+debug = false
